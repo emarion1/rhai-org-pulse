@@ -94,6 +94,26 @@ export async function refreshTeamMetrics(teamKey) {
   })
 }
 
+// ─── Annotations ───
+
+export async function getSprintAnnotations(sprintId) {
+  return apiRequest(`/sprints/${encodeURIComponent(sprintId)}/annotations`)
+}
+
+export async function saveAnnotation(sprintId, assignee, text) {
+  return apiRequest(`/sprints/${encodeURIComponent(sprintId)}/annotations`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignee, text })
+  })
+}
+
+export async function deleteAnnotation(sprintId, assignee, annotationId) {
+  return apiRequest(`/sprints/${encodeURIComponent(sprintId)}/annotations/${encodeURIComponent(assignee)}/${encodeURIComponent(annotationId)}`, {
+    method: 'DELETE'
+  })
+}
+
 // ─── Allowlist ───
 
 export async function getAllowlist() {

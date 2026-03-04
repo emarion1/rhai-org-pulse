@@ -1,17 +1,21 @@
 const fetch = require('node-fetch');
 const { readFromS3, writeToS3 } = require('./s3-storage');
-const { createJiraClient } = require('./jira-client');
-const { discoverBoards, performRefresh: orchestrate } = require('./orchestration');
+const { fetchPersonMetrics } = require('./person-metrics');
 
 const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
+const CONCURRENCY = 3;
+
+function sanitizeFilename(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
 
 /**
- * Run a full refresh: discover boards, fetch sprint data, write to S3.
+ * Refresh person metrics for a list of Jira display names.
+ * Fetches from Jira with concurrency-limited workers and writes results to S3.
  */
-async function performRefresh({ hardRefresh, jiraToken }) {
-  console.log(`Starting refresh (hardRefresh: ${hardRefresh})`);
+async function refreshPersonMetrics({ jiraToken, members }) {
+  console.log(`Starting person metrics refresh for ${members.length} members`);
 
-  // Build jiraRequest function with the SSM token
   async function jiraRequest(path) {
     const MAX_RETRIES = 3;
 
@@ -40,41 +44,35 @@ async function performRefresh({ hardRefresh, jiraToken }) {
     }
   }
 
-  // Create Jira client with injected dependencies
-  const jiraClient = createJiraClient({ jiraRequest, jiraHost: JIRA_HOST });
+  // Concurrency-limited worker queue
+  let index = 0;
+  let completed = 0;
+  let failed = 0;
 
-  const deps = {
-    ...jiraClient,
-    readStorage: readFromS3,
-    writeStorage: writeToS3,
-    jiraHost: JIRA_HOST,
-    hardRefresh,
-    onProgress: async (event) => {
-      // Write progress to S3 for polling
+  async function worker() {
+    while (index < members.length) {
+      const memberName = members[index++];
       try {
-        await writeToS3('refresh-status.json', {
-          ...event,
-          timestamp: new Date().toISOString()
-        });
-      } catch (err) {
-        console.warn('Failed to write refresh status:', err.message);
+        console.log(`[refresh] Fetching metrics for ${memberName} (${completed + failed + 1}/${members.length})`);
+        const metrics = await fetchPersonMetrics(jiraRequest, memberName);
+        const key = sanitizeFilename(memberName);
+        await writeToS3(`people/${key}.json`, metrics);
+        completed++;
+      } catch (error) {
+        console.error(`[refresh] Failed for ${memberName}:`, error.message);
+        failed++;
       }
     }
-  };
+  }
 
-  // Run the orchestration
-  const result = await orchestrate(deps);
+  const workers = [];
+  for (let w = 0; w < Math.min(CONCURRENCY, members.length); w++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
 
-  // Write final status
-  await writeToS3('refresh-status.json', {
-    type: 'complete',
-    boardCount: result.boardCount,
-    sprintCount: result.sprintCount,
-    timestamp: new Date().toISOString()
-  });
-
-  console.log(`Refresh complete: ${result.boardCount} boards, ${result.sprintCount} sprints`);
-  return result;
+  console.log(`[refresh] Complete: ${completed} succeeded, ${failed} failed out of ${members.length}`);
+  return { completed, failed };
 }
 
-module.exports = { performRefresh };
+module.exports = { refreshPersonMetrics };

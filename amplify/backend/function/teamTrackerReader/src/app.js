@@ -1,8 +1,11 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const fetch = require('node-fetch');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const { readFromS3, writeToS3 } = require('./s3-storage');
 const { verifyToken } = require('./verifyToken');
+const { fetchPersonMetrics } = require('./person-metrics');
 
 const app = express();
 app.use(bodyParser.json());
@@ -17,6 +20,66 @@ app.use(function (req, res, next) {
 });
 
 const lambdaClient = new LambdaClient({ region: process.env.REGION || 'us-east-1' });
+const ssmClient = new SSMClient({ region: process.env.REGION || 'us-east-1' });
+
+const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
+const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+// ─── Jira token cache ───
+
+let cachedJiraToken = null;
+let tokenExpiry = 0;
+
+async function getJiraToken() {
+  if (cachedJiraToken && Date.now() < tokenExpiry) {
+    return cachedJiraToken;
+  }
+
+  const paramName = process.env.JIRA_TOKEN_PARAMETER_NAME
+    || `/team-tracker-app/${process.env.ENV || 'dev'}/jira-token`;
+
+  const command = new GetParameterCommand({
+    Name: paramName,
+    WithDecryption: true
+  });
+  const response = await ssmClient.send(command);
+  cachedJiraToken = response.Parameter.Value;
+  tokenExpiry = Date.now() + 55 * 60 * 1000; // cache for 55 minutes
+  return cachedJiraToken;
+}
+
+async function jiraRequest(path) {
+  const token = await getJiraToken();
+  const MAX_RETRIES = 3;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await fetch(`${JIRA_HOST}${path}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = parseInt(response.headers.get('retry-after'), 10);
+      const delay = (!isNaN(retryAfter) && retryAfter > 0) ? retryAfter * 1000 : Math.pow(2, attempt + 1) * 1000;
+      console.warn(`[Jira API] Rate limited (429), retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Jira API error (${response.status}): ${text}`);
+    }
+
+    return response.json();
+  }
+}
+
+function sanitizeFilename(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
 
 // ─── Allowlist seed ───
 
@@ -77,300 +140,199 @@ app.use(async function (req, res, next) {
   next();
 });
 
-// ─── Routes: Refresh ───
+// ─── Routes: Roster & Person Metrics ───
 
-app.post('/refresh', async function (req, res) {
+app.get('/roster', async function (req, res) {
   try {
-    const hardRefresh = req.body.hardRefresh || false;
+    const roster = await readFromS3('roster.json');
+    if (!roster) {
+      return res.status(404).json({ error: 'Roster not found' });
+    }
+    res.json(roster);
+  } catch (error) {
+    console.error('Read roster error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    const teamsData = await readFromS3('teams.json');
-    const enabledTeams = teamsData?.teams?.filter(t => t.enabled !== false) || [];
+app.get('/person/:jiraDisplayName/metrics', async function (req, res) {
+  try {
+    const name = decodeURIComponent(req.params.jiraDisplayName);
+    const key = sanitizeFilename(name);
+    const cachePath = `people/${key}.json`;
+    const forceRefresh = req.query.refresh === 'true';
 
-    // Write initial refresh status
-    await writeToS3('refresh-status.json', {
-      type: 'started',
-      timestamp: new Date().toISOString(),
-      boardCount: enabledTeams.length
+    // Check cache (4-hour TTL)
+    if (!forceRefresh) {
+      const cached = await readFromS3(cachePath);
+      if (cached && cached.fetchedAt) {
+        const age = Date.now() - new Date(cached.fetchedAt).getTime();
+        if (age < CACHE_TTL_MS) {
+          return res.json(cached);
+        }
+      }
+    }
+
+    // Fetch from Jira inline (2 parallel JQL queries, well within 25s timeout)
+    const metrics = await fetchPersonMetrics(jiraRequest, name);
+    await writeToS3(cachePath, metrics);
+    res.json(metrics);
+  } catch (error) {
+    console.error(`Person metrics error (${req.params.jiraDisplayName}):`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/team/:teamKey/metrics', async function (req, res) {
+  try {
+    const teamKey = decodeURIComponent(req.params.teamKey);
+    const roster = await readFromS3('roster.json');
+    if (!roster) {
+      return res.status(404).json({ error: 'Roster not found' });
+    }
+
+    const team = roster.teams[teamKey];
+    if (!team) {
+      return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
+    }
+
+    // Deduplicate members by jiraDisplayName
+    const seen = new Set();
+    const uniqueMembers = team.members.filter(m => {
+      if (seen.has(m.jiraDisplayName)) return false;
+      seen.add(m.jiraDisplayName);
+      return true;
     });
 
-    // Invoke refresher Lambda asynchronously
+    let resolvedCount = 0;
+    let resolvedPoints = 0;
+    let inProgressCount = 0;
+    let cycleTimesSum = 0;
+    let cycleTimesCount = 0;
+    const members = [];
+    const resolvedIssues = [];
+
+    for (const member of uniqueMembers) {
+      const key = sanitizeFilename(member.jiraDisplayName);
+      const cached = await readFromS3(`people/${key}.json`);
+      const memberData = {
+        name: member.name,
+        jiraDisplayName: member.jiraDisplayName,
+        specialty: member.specialty,
+        metrics: null
+      };
+
+      if (cached) {
+        memberData.metrics = {
+          fetchedAt: cached.fetchedAt,
+          resolvedCount: cached.resolved?.count || 0,
+          resolvedPoints: cached.resolved?.storyPoints || 0,
+          inProgressCount: cached.inProgress?.count || 0,
+          avgCycleTimeDays: cached.cycleTime?.avgDays
+        };
+        resolvedCount += cached.resolved?.count || 0;
+        resolvedPoints += cached.resolved?.storyPoints || 0;
+        inProgressCount += cached.inProgress?.count || 0;
+        if (cached.resolved?.issues) {
+          for (const issue of cached.resolved.issues) {
+            resolvedIssues.push({ ...issue, assignee: member.jiraDisplayName });
+          }
+        }
+        if (cached.cycleTime?.avgDays != null) {
+          cycleTimesSum += cached.cycleTime.avgDays;
+          cycleTimesCount++;
+        }
+      }
+
+      members.push(memberData);
+    }
+
+    res.json({
+      teamKey,
+      displayName: team.displayName,
+      memberCount: uniqueMembers.length,
+      aggregate: {
+        resolvedCount,
+        resolvedPoints,
+        inProgressCount,
+        avgCycleTimeDays: cycleTimesCount > 0 ? +(cycleTimesSum / cycleTimesCount).toFixed(1) : null
+      },
+      members,
+      resolvedIssues
+    });
+  } catch (error) {
+    console.error(`Team metrics error (${req.params.teamKey}):`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/roster/refresh', async function (req, res) {
+  try {
+    const roster = await readFromS3('roster.json');
+    if (!roster) {
+      return res.status(404).json({ error: 'Roster not found' });
+    }
+
+    // Collect unique member names across all teams
+    const seen = new Set();
+    for (const team of Object.values(roster.teams)) {
+      for (const member of team.members) {
+        seen.add(member.jiraDisplayName);
+      }
+    }
+    const memberNames = [...seen];
+
+    // Invoke Refresher Lambda asynchronously
     const refresherName = `teamTrackerRefresher-${process.env.ENV || 'dev'}`;
     const command = new InvokeCommand({
       FunctionName: refresherName,
       InvocationType: 'Event',
-      Payload: JSON.stringify({ hardRefresh })
+      Payload: JSON.stringify({ type: 'roster-refresh', members: memberNames })
     });
-
     await lambdaClient.send(command);
 
-    res.status(202).json({ status: 'started', boardCount: enabledTeams.length });
+    res.json({ status: 'started', memberCount: memberNames.length });
   } catch (error) {
-    console.error('Refresh error:', error);
+    console.error('Roster refresh error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/refresh/status', async function (req, res) {
+app.post('/team/:teamKey/refresh', async function (req, res) {
   try {
-    const status = await readFromS3('refresh-status.json');
-    res.json(status || { type: 'idle' });
+    const teamKey = decodeURIComponent(req.params.teamKey);
+    const roster = await readFromS3('roster.json');
+    if (!roster) {
+      return res.status(404).json({ error: 'Roster not found' });
+    }
+
+    const team = roster.teams[teamKey];
+    if (!team) {
+      return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
+    }
+
+    // Deduplicate members
+    const seen = new Set();
+    const memberNames = team.members
+      .filter(m => {
+        if (seen.has(m.jiraDisplayName)) return false;
+        seen.add(m.jiraDisplayName);
+        return true;
+      })
+      .map(m => m.jiraDisplayName);
+
+    // Invoke Refresher Lambda asynchronously
+    const refresherName = `teamTrackerRefresher-${process.env.ENV || 'dev'}`;
+    const command = new InvokeCommand({
+      FunctionName: refresherName,
+      InvocationType: 'Event',
+      Payload: JSON.stringify({ type: 'team-refresh', members: memberNames })
+    });
+    await lambdaClient.send(command);
+
+    res.json({ status: 'started', memberCount: memberNames.length });
   } catch (error) {
-    console.error('Refresh status error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ─── Routes: Reader ───
-
-app.get('/boards', async function (req, res) {
-  try {
-    const teamsData = await readFromS3('teams.json');
-    if (!teamsData || !teamsData.teams) {
-      return res.json({ boards: [], lastUpdated: null });
-    }
-
-    const boards = teamsData.teams
-      .filter(t => t.enabled !== false)
-      .map(t => ({
-        id: t.teamId || t.boardId,
-        boardId: t.boardId,
-        name: t.boardName || t.displayName,
-        displayName: t.displayName || t.boardName,
-        sprintFilter: t.sprintFilter || undefined
-      }));
-
-    const boardsData = await readFromS3('boards.json');
-    res.json({ boards, lastUpdated: boardsData?.lastUpdated || null });
-  } catch (error) {
-    console.error('Read boards error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/boards/:boardId/sprints', async function (req, res) {
-  try {
-    const { boardId } = req.params;
-    const data = await readFromS3(`sprints/team-${boardId}.json`)
-      || await readFromS3(`sprints/board-${boardId}.json`);
-    if (!data) {
-      return res.json({ sprints: [] });
-    }
-    res.json(data);
-  } catch (error) {
-    console.error('Read sprints error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/boards/:boardId/trend', async function (req, res) {
-  try {
-    const { boardId } = req.params;
-    const sprintIndex = await readFromS3(`sprints/team-${boardId}.json`)
-      || await readFromS3(`sprints/board-${boardId}.json`);
-    if (!sprintIndex?.sprints?.length) {
-      return res.json({ sprints: [] });
-    }
-
-    const trendData = [];
-    for (const sprint of sprintIndex.sprints) {
-      if (sprint.state !== 'closed') continue;
-      const sprintData = await readFromS3(`sprints/${sprint.id}.json`);
-      if (!sprintData?.metrics) continue;
-
-      const byAssignee = {};
-      if (sprintData.byAssignee) {
-        for (const [name, data] of Object.entries(sprintData.byAssignee)) {
-          byAssignee[name] = {
-            pointsCompleted: data.pointsCompleted,
-            issuesCompleted: data.issuesCompleted,
-            pointsAssigned: data.pointsAssigned,
-            completionRate: data.completionRate
-          };
-        }
-      }
-
-      trendData.push({
-        sprintId: sprint.id,
-        sprintName: sprint.name,
-        startDate: sprint.startDate,
-        endDate: sprint.endDate || sprint.completeDate,
-        ...sprintData.metrics,
-        byAssignee
-      });
-    }
-
-    trendData.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-    res.json({ sprints: trendData });
-  } catch (error) {
-    console.error('Read board trend error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/sprints/:sprintId', async function (req, res) {
-  try {
-    const { sprintId } = req.params;
-    const data = await readFromS3(`sprints/${sprintId}.json`);
-    if (!data) {
-      return res.status(404).json({
-        error: 'Sprint data not found. Please refresh to fetch data from Jira.'
-      });
-    }
-    res.json(data);
-  } catch (error) {
-    console.error('Read sprint data error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/teams', async function (req, res) {
-  try {
-    const data = await readFromS3('teams.json');
-    if (!data) {
-      return res.json({ teams: [] });
-    }
-    res.json(data);
-  } catch (error) {
-    console.error('Read teams error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/teams', async function (req, res) {
-  try {
-    const { teams } = req.body;
-    if (!teams || !Array.isArray(teams)) {
-      return res.status(400).json({ error: 'Request must include "teams" array' });
-    }
-    await writeToS3('teams.json', { teams });
-    res.json({ success: true, teams });
-  } catch (error) {
-    console.error('Save teams error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/dashboard-summary', async function (req, res) {
-  try {
-    const data = await readFromS3('dashboard-summary.json');
-    if (data) {
-      return res.json(data);
-    }
-
-    // Build on-the-fly from existing sprint data
-    const teamsData = await readFromS3('teams.json');
-    const enabledTeams = teamsData?.teams?.filter(t => t.enabled !== false) || [];
-    if (enabledTeams.length === 0) {
-      return res.json({ lastUpdated: null, boards: {} });
-    }
-
-    const boardsData = await readFromS3('boards.json');
-    const ROLLING_SPRINT_COUNT = 6;
-    const summary = { lastUpdated: boardsData?.lastUpdated || null, boards: {} };
-
-    for (const team of enabledTeams) {
-      const teamId = team.teamId || String(team.boardId);
-      const boardSprints = await readFromS3(`sprints/team-${teamId}.json`)
-        || await readFromS3(`sprints/board-${team.boardId}.json`);
-      if (!boardSprints?.sprints?.length) continue;
-
-      const closedSprints = [...boardSprints.sprints]
-        .filter(s => s.state === 'closed')
-        .sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
-
-      if (closedSprints.length === 0) continue;
-
-      const latestClosed = closedSprints[0];
-      const recentSprints = closedSprints.slice(0, ROLLING_SPRINT_COUNT);
-
-      let totalCommitted = 0;
-      let totalDelivered = 0;
-      let totalScopeChange = 0;
-      let sprintsUsed = 0;
-
-      for (const sprint of recentSprints) {
-        const sd = await readFromS3(`sprints/${sprint.id}.json`);
-        if (!sd) continue;
-        totalCommitted += sd.committed?.totalPoints || 0;
-        totalDelivered += sd.delivered?.totalPoints || 0;
-        totalScopeChange += sd.metrics?.scopeChangeCount || 0;
-        sprintsUsed++;
-      }
-
-      summary.boards[teamId] = {
-        boardName: team.displayName || team.boardName,
-        sprint: {
-          id: latestClosed.id,
-          name: latestClosed.name,
-          state: latestClosed.state,
-          startDate: latestClosed.startDate,
-          endDate: latestClosed.endDate
-        },
-        metrics: {
-          commitmentReliabilityPoints: totalCommitted > 0
-            ? Math.round((totalDelivered / totalCommitted) * 100)
-            : 0,
-          avgVelocityPoints: sprintsUsed > 0 ? Math.round(totalDelivered / sprintsUsed) : 0,
-          avgScopeChange: sprintsUsed > 0 ? +(totalScopeChange / sprintsUsed).toFixed(1) : 0,
-          sprintsUsed
-        }
-      };
-    }
-
-    res.json(summary);
-  } catch (error) {
-    console.error('Read dashboard summary error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/trend', async function (req, res) {
-  try {
-    const boardIds = (req.query.boardIds || '').split(',').filter(Boolean);
-    if (boardIds.length === 0) {
-      return res.json({ months: [] });
-    }
-
-    const allSprintData = [];
-    for (const boardId of boardIds) {
-      const sprintIndex = await readFromS3(`sprints/team-${boardId}.json`)
-        || await readFromS3(`sprints/board-${boardId}.json`);
-      if (!sprintIndex?.sprints?.length) continue;
-
-      for (const sprint of sprintIndex.sprints) {
-        if (sprint.state !== 'closed') continue;
-        const sprintData = await readFromS3(`sprints/${sprint.id}.json`);
-        if (!sprintData?.metrics) continue;
-        allSprintData.push({
-          endDate: sprint.endDate || sprint.completeDate,
-          velocityPoints: sprintData.metrics.velocityPoints || 0,
-          velocityCount: sprintData.metrics.velocityCount || 0,
-          committedPoints: sprintData.committed?.totalPoints || 0,
-          deliveredPoints: sprintData.delivered?.totalPoints || 0
-        });
-      }
-    }
-
-    const buckets = {};
-    for (const sprint of allSprintData) {
-      if (!sprint.endDate) continue;
-      const date = new Date(sprint.endDate);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      if (!buckets[key]) {
-        buckets[key] = { month: key, velocityPoints: 0, velocityCount: 0, committedPoints: 0, deliveredPoints: 0, sprintCount: 0 };
-      }
-      const b = buckets[key];
-      b.velocityPoints += sprint.velocityPoints;
-      b.velocityCount += sprint.velocityCount;
-      b.committedPoints += sprint.committedPoints;
-      b.deliveredPoints += sprint.deliveredPoints;
-      b.sprintCount += 1;
-    }
-
-    const months = Object.values(buckets).sort((a, b) => a.month.localeCompare(b.month));
-    res.json({ months });
-  } catch (error) {
-    console.error('Read aggregate trend error:', error);
+    console.error(`Team refresh error (${req.params.teamKey}):`, error);
     res.status(500).json({ error: error.message });
   }
 });
