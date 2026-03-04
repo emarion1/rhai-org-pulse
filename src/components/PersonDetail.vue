@@ -107,6 +107,7 @@
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Summary</th>
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Points</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cycle Time</th>
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Resolved</th>
               </tr>
             </thead>
@@ -124,6 +125,9 @@
                 <td class="px-4 py-2 text-sm text-gray-900 max-w-md truncate">{{ issue.summary }}</td>
                 <td class="px-4 py-2 text-sm text-gray-500">{{ issue.issueType }}</td>
                 <td class="px-4 py-2 text-sm text-gray-500">{{ issue.storyPoints || '—' }}</td>
+                <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">
+                  {{ issue.cycleTimeDays != null ? `${Math.round(issue.cycleTimeDays)}d` : '—' }}
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">
                   {{ issue.resolutionDate ? new Date(issue.resolutionDate).toLocaleDateString() : '—' }}
                 </td>
