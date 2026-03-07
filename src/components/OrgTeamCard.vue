@@ -5,7 +5,20 @@
   >
     <div class="flex items-start justify-between mb-3">
       <h3 class="text-base font-semibold text-gray-900">{{ team.displayName }}</h3>
-      <span class="text-sm text-gray-500">{{ uniqueCount }} members</span>
+      <div class="flex items-center gap-2">
+        <svg
+          v-if="isUnassigned"
+          class="h-4 w-4 text-amber-500"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          title="Members not yet assigned to a team"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span class="text-sm text-gray-500">{{ uniqueCount }} members</span>
+      </div>
     </div>
     <div class="flex flex-wrap gap-1.5">
       <span
@@ -38,6 +51,8 @@ const uniqueMembers = computed(() => {
 })
 
 const uniqueCount = computed(() => uniqueMembers.value.length)
+
+const isUnassigned = computed(() => props.team.key.endsWith('::_unassigned'))
 
 const specialtyBreakdown = computed(() => {
   const counts = {}

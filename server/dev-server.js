@@ -491,15 +491,88 @@ function sanitizeFilename(name) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '_');
 }
 
-function readRoster() {
-  const rosterPath = path.join(__dirname, '..', 'org-roster.json');
+function readRosterFull() {
+  const rosterPath = path.join(__dirname, '..', 'data', 'org-roster-full.json');
   const raw = fs.readFileSync(rosterPath, 'utf8');
   return JSON.parse(raw);
 }
 
+/**
+ * Derive team groupings from the full org roster.
+ * Groups members by jiraTeam within each org leader's scope.
+ * Returns { orgs: [ { key, leader, teams: { teamName: { displayName, members } } } ] }
+ */
+const ORG_DISPLAY_NAMES = {
+  shgriffi: 'AI Platform',
+  crobson: 'AAET',
+  tgunders: 'AI Platform Core Components',
+  tibrahim: 'Inference Engineering',
+  kaixu: 'AI Innovation',
+  moromila: 'WatsonX.ai'
+};
+
+function deriveRoster() {
+  const full = readRosterFull();
+  const orgs = [];
+
+  for (const [orgKey, orgData] of Object.entries(full.orgs)) {
+    const teamMap = {};
+    const allMembers = [orgData.leader, ...orgData.members];
+
+    for (const person of allMembers) {
+      // Split comma-separated team names so multi-team people appear in each team
+      const teamNames = person.jiraTeam
+        ? person.jiraTeam.split(',').map(t => t.trim()).filter(Boolean)
+        : ['_unassigned'];
+
+      const memberEntry = {
+        name: person.name,
+        jiraDisplayName: person.name,
+        uid: person.uid,
+        email: person.email,
+        title: person.title,
+        specialty: person.specialty || null,
+        manager: person.managerUid || null,
+        miroTeam: person.miroTeam || null,
+        jiraComponent: person.jiraComponent || null,
+        jiraTeam: person.jiraTeam || null,
+        status: person.status || null,
+        githubUsername: person.githubUsername || null,
+        geo: person.geo || null,
+        location: person.location || null,
+        country: person.country || null,
+        city: person.city || null
+      };
+
+      for (const teamName of teamNames) {
+        if (!teamMap[teamName]) {
+          teamMap[teamName] = {
+            displayName: teamName === '_unassigned' ? 'Unassigned' : teamName,
+            members: []
+          };
+        }
+        teamMap[teamName].members.push(memberEntry);
+      }
+    }
+
+    orgs.push({
+      key: orgKey,
+      displayName: ORG_DISPLAY_NAMES[orgKey] || orgData.leader.name,
+      leader: {
+        name: orgData.leader.name,
+        uid: orgData.leader.uid,
+        title: orgData.leader.title
+      },
+      teams: teamMap
+    });
+  }
+
+  return { vp: full.vp, orgs };
+}
+
 app.get('/api/roster', function(req, res) {
   try {
-    const roster = readRoster();
+    const roster = deriveRoster();
     res.json(roster);
   } catch (error) {
     console.error('Read roster error:', error);
@@ -542,8 +615,30 @@ app.get('/api/person/:jiraDisplayName/metrics', async function(req, res) {
 app.get('/api/team/:teamKey/metrics', function(req, res) {
   try {
     const teamKey = decodeURIComponent(req.params.teamKey);
-    const roster = readRoster();
-    const team = roster.teams[teamKey];
+    const roster = deriveRoster();
+
+    // teamKey format: "orgKey::teamName"
+    const sepIdx = teamKey.indexOf('::');
+    let team = null;
+    let orgKey = null;
+    let teamName = null;
+
+    if (sepIdx !== -1) {
+      orgKey = teamKey.substring(0, sepIdx);
+      teamName = teamKey.substring(sepIdx + 2);
+      const org = roster.orgs.find(o => o.key === orgKey);
+      if (org) team = org.teams[teamName];
+    } else {
+      // Fallback: search all orgs for the team name
+      for (const org of roster.orgs) {
+        if (org.teams[teamKey]) {
+          team = org.teams[teamKey];
+          orgKey = org.key;
+          teamName = teamKey;
+          break;
+        }
+      }
+    }
 
     if (!team) {
       return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
@@ -621,16 +716,18 @@ app.get('/api/team/:teamKey/metrics', function(req, res) {
 
 app.post('/api/roster/refresh', function(req, res) {
   try {
-    const roster = readRoster();
+    const roster = deriveRoster();
 
-    // Collect unique members across all teams
+    // Collect unique members across all orgs and teams
     const seen = new Set();
     const uniqueMembers = [];
-    for (const team of Object.values(roster.teams)) {
-      for (const member of team.members) {
-        if (!seen.has(member.jiraDisplayName)) {
-          seen.add(member.jiraDisplayName);
-          uniqueMembers.push(member);
+    for (const org of roster.orgs) {
+      for (const team of Object.values(org.teams)) {
+        for (const member of team.members) {
+          if (!seen.has(member.jiraDisplayName)) {
+            seen.add(member.jiraDisplayName);
+            uniqueMembers.push(member);
+          }
         }
       }
     }
@@ -678,8 +775,24 @@ app.post('/api/roster/refresh', function(req, res) {
 app.post('/api/team/:teamKey/refresh', function(req, res) {
   try {
     const teamKey = decodeURIComponent(req.params.teamKey);
-    const roster = readRoster();
-    const team = roster.teams[teamKey];
+    const roster = deriveRoster();
+
+    // teamKey format: "orgKey::teamName"
+    let team = null;
+    const sepIdx = teamKey.indexOf('::');
+    if (sepIdx !== -1) {
+      const orgKey = teamKey.substring(0, sepIdx);
+      const teamName = teamKey.substring(sepIdx + 2);
+      const org = roster.orgs.find(o => o.key === orgKey);
+      if (org) team = org.teams[teamName];
+    } else {
+      for (const org of roster.orgs) {
+        if (org.teams[teamKey]) {
+          team = org.teams[teamKey];
+          break;
+        }
+      }
+    }
 
     if (!team) {
       return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });

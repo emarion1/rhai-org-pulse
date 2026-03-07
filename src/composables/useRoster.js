@@ -4,12 +4,24 @@ import { getRoster } from '../services/api'
 const rosterData = ref(null)
 const loading = ref(false)
 const error = ref(null)
+const selectedOrgKey = ref(null)
 
 export function useRoster() {
+  const orgs = computed(() => {
+    if (!rosterData.value?.orgs) return []
+    return rosterData.value.orgs
+  })
+
+  const selectedOrg = computed(() => {
+    if (!selectedOrgKey.value) return null
+    return orgs.value.find(o => o.key === selectedOrgKey.value) || null
+  })
+
   const teams = computed(() => {
-    if (!rosterData.value?.teams) return []
-    return Object.entries(rosterData.value.teams).map(([key, team]) => ({
-      key,
+    const org = selectedOrg.value
+    if (!org?.teams) return []
+    return Object.entries(org.teams).map(([teamName, team]) => ({
+      key: `${org.key}::${teamName}`,
       displayName: team.displayName,
       members: team.members
     }))
@@ -46,12 +58,20 @@ export function useRoster() {
     return names.size
   })
 
+  function selectOrg(orgKey) {
+    selectedOrgKey.value = orgKey
+  }
+
   async function loadRoster() {
     if (rosterData.value) return
     loading.value = true
     error.value = null
     try {
       rosterData.value = await getRoster()
+      // Auto-select first org if none selected
+      if (!selectedOrgKey.value && rosterData.value.orgs?.length > 0) {
+        selectedOrgKey.value = rosterData.value.orgs[0].key
+      }
     } catch (err) {
       error.value = err.message
       console.error('Failed to load roster:', err)
@@ -62,6 +82,10 @@ export function useRoster() {
 
   return {
     rosterData,
+    orgs,
+    selectedOrg,
+    selectedOrgKey,
+    selectOrg,
     teams,
     loading,
     error,

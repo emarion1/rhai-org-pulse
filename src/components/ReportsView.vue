@@ -17,6 +17,18 @@
     <div class="flex gap-6">
       <!-- Sidebar -->
       <aside class="w-72 shrink-0 space-y-6">
+        <div v-if="orgs.length > 1" class="bg-white rounded-lg shadow p-4">
+          <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Organization</h3>
+          <select
+            :value="selectedOrgKey"
+            @change="handleOrgChange($event.target.value)"
+            class="w-full text-sm border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+          >
+            <option v-for="org in orgs" :key="org.key" :value="org.key">
+              {{ org.displayName }}
+            </option>
+          </select>
+        </div>
         <div class="bg-white rounded-lg shadow p-4">
           <ReportsTeamSelector :teams="teams" v-model="selectedTeamKeys" />
         </div>
@@ -72,7 +84,7 @@ import { getTeamMetrics } from '../services/api'
 
 defineEmits(['back'])
 
-const { teams } = useRoster()
+const { orgs, teams, selectedOrgKey, selectOrg } = useRoster()
 
 const selectedTeamKeys = ref([])
 const selectedMetrics = ref([])
@@ -111,6 +123,12 @@ const METRIC_DEFS = {
       return members > 0 ? Math.round((count / members) * 10) / 10 : 0
     }
   }
+}
+
+function handleOrgChange(orgKey) {
+  selectOrg(orgKey)
+  selectedTeamKeys.value = []
+  charts.value = []
 }
 
 async function generate() {

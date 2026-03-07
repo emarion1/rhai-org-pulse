@@ -18,6 +18,21 @@
       </button>
     </div>
 
+    <!-- Org Selector -->
+    <div v-if="orgs.length > 0" class="flex flex-wrap gap-2 mb-6">
+      <button
+        v-for="org in orgs"
+        :key="org.key"
+        @click="selectOrg(org.key)"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition-colors border"
+        :class="selectedOrgKey === org.key
+          ? 'bg-primary-600 text-white border-primary-600'
+          : 'bg-white text-gray-700 border-gray-300 hover:border-primary-300 hover:bg-primary-50'"
+      >
+        {{ org.displayName }}
+      </button>
+    </div>
+
     <!-- Loading state -->
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
@@ -54,7 +69,7 @@ import OrgTeamCard from './OrgTeamCard.vue'
 import { useRoster } from '../composables/useRoster'
 import { refreshAllMetrics } from '../services/api'
 
-const { teams, loading, error, uniqueMemberCount } = useRoster()
+const { orgs, teams, loading, error, uniqueMemberCount, selectedOrgKey, selectOrg } = useRoster()
 
 defineEmits(['select-team'])
 
@@ -68,7 +83,6 @@ async function handleRefreshAll() {
   } catch (err) {
     console.error('Failed to start refresh:', err)
   } finally {
-    // The server processes in the background; keep spinner briefly to indicate it was kicked off
     setTimeout(() => {
       isRefreshing.value = false
     }, 3000)
