@@ -100,6 +100,13 @@ export async function getGithubContributions() {
   return apiRequest('/github/contributions')
 }
 
+export async function refreshGithubContribution(username) {
+  return apiRequest(`/github/contributions/${encodeURIComponent(username)}/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
+
 export async function refreshGithubContributions() {
   return apiRequest('/github/refresh', {
     method: 'POST',

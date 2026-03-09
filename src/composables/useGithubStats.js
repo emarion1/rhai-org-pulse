@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { getGithubContributions, refreshGithubContributions } from '../services/api'
+import { getGithubContributions, refreshGithubContributions, refreshGithubContribution } from '../services/api'
 
 const githubData = ref(null)
 const loading = ref(false)
@@ -45,11 +45,27 @@ export function useGithubStats() {
     }
   }
 
+  async function refreshUserStats(username) {
+    if (!username) return null
+    try {
+      const data = await refreshGithubContribution(username)
+      if (data && githubData.value) {
+        if (!githubData.value.users) githubData.value.users = {}
+        githubData.value.users[username] = data
+      }
+      return data
+    } catch (err) {
+      console.error('Failed to refresh GitHub stats for', username, err)
+      return null
+    }
+  }
+
   return {
     contributionsMap,
     getContributions,
     loadGithubStats,
     refreshStats,
+    refreshUserStats,
     loading
   }
 }

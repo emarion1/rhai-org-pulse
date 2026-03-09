@@ -101,6 +101,7 @@
           label="GitHub Contributions"
           :value="githubContributions?.totalContributions ?? '—'"
           :subtitle="person.githubUsername ? 'Last year' : 'No GitHub username'"
+          tooltip="Public contributions via GitHub API. May differ slightly from the GitHub profile due to week-aligned date windows."
         />
       </div>
 
@@ -208,7 +209,7 @@ const props = defineProps({
 defineEmits(['back', 'go-dashboard'])
 
 const { getTeamsForPerson } = useRoster()
-const { getContributions } = useGithubStats()
+const { getContributions, refreshUserStats } = useGithubStats()
 
 const githubContributions = computed(() => getContributions(props.person.githubUsername))
 const githubProfileUrl = props.person.githubUsername
@@ -225,7 +226,12 @@ async function loadMetrics(refresh = false) {
   isLoading.value = true
   error.value = null
   try {
-    metrics.value = await getPersonMetrics(props.person.jiraDisplayName, { refresh })
+    const promises = [getPersonMetrics(props.person.jiraDisplayName, { refresh })]
+    if (refresh && props.person.githubUsername) {
+      promises.push(refreshUserStats(props.person.githubUsername))
+    }
+    const [jiraMetrics] = await Promise.all(promises)
+    metrics.value = jiraMetrics
   } catch (err) {
     error.value = err.message
     console.error('Failed to load person metrics:', err)

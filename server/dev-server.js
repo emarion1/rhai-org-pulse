@@ -511,13 +511,16 @@ const ORG_DISPLAY_NAMES = {
   moromila: 'WatsonX.ai'
 };
 
+const EXCLUDED_TITLES = ['Intern', 'Collaborative Partner', 'Independent Contractor'];
+
 function deriveRoster() {
   const full = readRosterFull();
   const orgs = [];
 
   for (const [orgKey, orgData] of Object.entries(full.orgs)) {
     const teamMap = {};
-    const allMembers = [orgData.leader, ...orgData.members];
+    const allMembers = [orgData.leader, ...orgData.members]
+      .filter(p => !EXCLUDED_TITLES.includes(p.title));
 
     for (const person of allMembers) {
       // Split comma-separated team names so multi-team people appear in each team
@@ -879,6 +882,24 @@ app.get('/api/github/contributions/:username', function(req, res) {
     res.json(data);
   } catch (error) {
     console.error('Read GitHub contribution error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/github/contributions/:username/refresh', function(req, res) {
+  try {
+    const username = decodeURIComponent(req.params.username);
+    const results = fetchContributions([username]);
+    const cache = readGithubCache();
+
+    if (results[username]) {
+      cache.users[username] = results[username];
+      writeToStorage(GITHUB_CACHE_PATH, cache);
+    }
+
+    res.json(results[username] || null);
+  } catch (error) {
+    console.error('GitHub single user refresh error:', error);
     res.status(500).json({ error: error.message });
   }
 });

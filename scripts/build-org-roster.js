@@ -148,8 +148,16 @@ function traverseOrg(rootUid, allPeople, depth = 0) {
   const reports = fetchDirectReports(rootUid)
   const indent = '  '.repeat(depth)
 
+  const EXCLUDED_TITLES = ['Intern', 'Collaborative Partner', 'Independent Contractor']
+
   for (const entry of reports) {
     const person = entryToPerson(entry)
+
+    if (EXCLUDED_TITLES.includes(person.title)) {
+      console.log(`${indent}  [SKIP] ${person.name} (${person.uid}) - ${person.title}`)
+      continue
+    }
+
     console.log(`${indent}  ${person.name} (${person.uid}) - ${person.title}`)
     allPeople.push(person)
 
