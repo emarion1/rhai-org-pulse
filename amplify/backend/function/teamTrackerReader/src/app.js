@@ -155,11 +155,84 @@ async function persistNameCache() {
   await writeToS3('jira-name-map.json', jiraNameCache || {});
 }
 
+// ─── Roster derivation ───
+
+const ORG_DISPLAY_NAMES = {
+  shgriffi: 'AI Platform',
+  crobson: 'AAET',
+  tgunders: 'AI Platform Core Components',
+  tibrahim: 'Inference Engineering',
+  kaixu: 'AI Innovation',
+  moromila: 'WatsonX.ai'
+};
+
+const EXCLUDED_TITLES = ['Intern', 'Collaborative Partner', 'Independent Contractor'];
+
+async function deriveRoster() {
+  const full = await readFromS3('org-roster-full.json');
+  if (!full || !full.orgs) return null;
+
+  const orgs = [];
+  for (const [orgKey, orgData] of Object.entries(full.orgs)) {
+    const teamMap = {};
+    const allMembers = [orgData.leader, ...orgData.members]
+      .filter(p => !EXCLUDED_TITLES.includes(p.title));
+
+    for (const person of allMembers) {
+      const teamNames = person.jiraTeam
+        ? person.jiraTeam.split(',').map(t => t.trim()).filter(Boolean)
+        : ['_unassigned'];
+
+      const memberEntry = {
+        name: person.name,
+        jiraDisplayName: person.name,
+        uid: person.uid,
+        email: person.email,
+        title: person.title,
+        specialty: person.specialty || null,
+        manager: person.managerUid || null,
+        miroTeam: person.miroTeam || null,
+        jiraComponent: person.jiraComponent || null,
+        jiraTeam: person.jiraTeam || null,
+        status: person.status || null,
+        githubUsername: person.githubUsername || null,
+        geo: person.geo || null,
+        location: person.location || null,
+        country: person.country || null,
+        city: person.city || null
+      };
+
+      for (const teamName of teamNames) {
+        if (!teamMap[teamName]) {
+          teamMap[teamName] = {
+            displayName: teamName === '_unassigned' ? 'Unassigned' : teamName,
+            members: []
+          };
+        }
+        teamMap[teamName].members.push(memberEntry);
+      }
+    }
+
+    orgs.push({
+      key: orgKey,
+      displayName: ORG_DISPLAY_NAMES[orgKey] || orgData.leader.name,
+      leader: {
+        name: orgData.leader.name,
+        uid: orgData.leader.uid,
+        title: orgData.leader.title
+      },
+      teams: teamMap
+    });
+  }
+
+  return { vp: full.vp, orgs };
+}
+
 // ─── Routes: Roster & Person Metrics ───
 
 app.get('/roster', async function (req, res) {
   try {
-    const roster = await readFromS3('roster.json');
+    const roster = await deriveRoster();
     if (!roster) {
       return res.status(404).json({ error: 'Roster not found' });
     }
@@ -206,12 +279,16 @@ app.get('/person/:jiraDisplayName/metrics', async function (req, res) {
 app.get('/team/:teamKey/metrics', async function (req, res) {
   try {
     const teamKey = decodeURIComponent(req.params.teamKey);
-    const roster = await readFromS3('roster.json');
+    const roster = await deriveRoster();
     if (!roster) {
       return res.status(404).json({ error: 'Roster not found' });
     }
 
-    const team = roster.teams[teamKey];
+    // Find team using composite key "orgKey::teamName"
+    let team = null;
+    const [orgKey, teamName] = teamKey.split('::');
+    const org = roster.orgs.find(o => o.key === orgKey);
+    if (org) team = org.teams[teamName];
     if (!team) {
       return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
     }
@@ -288,16 +365,18 @@ app.get('/team/:teamKey/metrics', async function (req, res) {
 
 app.post('/roster/refresh', async function (req, res) {
   try {
-    const roster = await readFromS3('roster.json');
+    const roster = await deriveRoster();
     if (!roster) {
       return res.status(404).json({ error: 'Roster not found' });
     }
 
-    // Collect unique member names across all teams
+    // Collect unique member names across all orgs/teams
     const seen = new Set();
-    for (const team of Object.values(roster.teams)) {
-      for (const member of team.members) {
-        seen.add(member.jiraDisplayName);
+    for (const org of roster.orgs) {
+      for (const team of Object.values(org.teams)) {
+        for (const member of team.members) {
+          seen.add(member.jiraDisplayName);
+        }
       }
     }
     const memberNames = [...seen];
@@ -321,12 +400,17 @@ app.post('/roster/refresh', async function (req, res) {
 app.post('/team/:teamKey/refresh', async function (req, res) {
   try {
     const teamKey = decodeURIComponent(req.params.teamKey);
-    const roster = await readFromS3('roster.json');
+    const roster = await deriveRoster();
     if (!roster) {
       return res.status(404).json({ error: 'Roster not found' });
     }
 
-    const team = roster.teams[teamKey];
+    // Find team across orgs using composite key
+    let team = null;
+    const [orgKey, teamName] = teamKey.split('::');
+    const org = roster.orgs.find(o => o.key === orgKey);
+    if (org) team = org.teams[teamName];
+
     if (!team) {
       return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
     }
@@ -362,6 +446,153 @@ app.delete('/jira-name-cache', async function (req, res) {
   await writeToS3('jira-name-map.json', {});
   res.json({ success: true });
 });
+
+// ─── Routes: People Metrics (bulk) ───
+
+app.get('/people/metrics', async function (req, res) {
+  try {
+    const roster = await deriveRoster();
+    if (!roster) {
+      return res.json({});
+    }
+
+    // Collect all unique member names
+    const seen = new Set();
+    for (const org of roster.orgs) {
+      for (const team of Object.values(org.teams)) {
+        for (const member of team.members) {
+          seen.add(member.jiraDisplayName || member.name);
+        }
+      }
+    }
+
+    const result = {};
+    for (const name of seen) {
+      const key = sanitizeFilename(name);
+      const cached = await readFromS3(`people/${key}.json`);
+      if (cached) {
+        result[name] = {
+          resolvedCount: cached.resolved?.count || 0,
+          resolvedPoints: cached.resolved?.storyPoints || 0,
+          inProgressCount: cached.inProgress?.count || 0,
+          avgCycleTimeDays: cached.cycleTime?.avgDays ?? null,
+          fetchedAt: cached.fetchedAt
+        };
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('People metrics error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Routes: GitHub Contributions ───
+
+app.get('/github/contributions', async function (req, res) {
+  try {
+    const cache = await readFromS3('github-contributions.json');
+    res.json(cache || { users: {}, fetchedAt: null });
+  } catch (error) {
+    console.error('GitHub contributions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Routes: Trends ───
+
+app.get('/trends', async function (req, res) {
+  try {
+    const roster = await deriveRoster();
+    const jira = await buildJiraTrends(roster);
+    const github = await readFromS3('github-history.json') || { users: {} };
+    res.json({ jira, github });
+  } catch (error) {
+    console.error('Trends error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+async function buildJiraTrends(roster) {
+  if (!roster) return {};
+
+  // Collect all unique members with their org/team info
+  const memberInfoMap = {};
+  for (const org of roster.orgs) {
+    for (const [teamName, team] of Object.entries(org.teams)) {
+      for (const member of team.members) {
+        const name = member.jiraDisplayName || member.name;
+        if (!memberInfoMap[name]) {
+          memberInfoMap[name] = { orgKey: org.key, teamKeys: [] };
+        }
+        memberInfoMap[name].teamKeys.push(`${org.key}::${teamName}`);
+      }
+    }
+  }
+
+  const months = {};
+
+  for (const [name, info] of Object.entries(memberInfoMap)) {
+    const key = sanitizeFilename(name);
+    const cached = await readFromS3(`people/${key}.json`);
+    if (!cached?.resolved?.issues) continue;
+
+    for (const issue of cached.resolved.issues) {
+      if (!issue.resolutionDate) continue;
+      const monthKey = issue.resolutionDate.substring(0, 7);
+      if (!months[monthKey]) {
+        months[monthKey] = {
+          resolved: 0, points: 0, cycleTimes: [],
+          byOrg: {}, byTeam: {}, byPerson: {}
+        };
+      }
+
+      const m = months[monthKey];
+      m.resolved++;
+      m.points += issue.storyPoints || 0;
+      if (issue.cycleTimeDays != null) m.cycleTimes.push(issue.cycleTimeDays);
+
+      // By org
+      if (!m.byOrg[info.orgKey]) m.byOrg[info.orgKey] = { resolved: 0, points: 0, cycleTimes: [] };
+      m.byOrg[info.orgKey].resolved++;
+      m.byOrg[info.orgKey].points += issue.storyPoints || 0;
+      if (issue.cycleTimeDays != null) m.byOrg[info.orgKey].cycleTimes.push(issue.cycleTimeDays);
+
+      // By team
+      for (const teamKey of info.teamKeys) {
+        if (!m.byTeam[teamKey]) m.byTeam[teamKey] = { resolved: 0, points: 0, cycleTimes: [] };
+        m.byTeam[teamKey].resolved++;
+        m.byTeam[teamKey].points += issue.storyPoints || 0;
+        if (issue.cycleTimeDays != null) m.byTeam[teamKey].cycleTimes.push(issue.cycleTimeDays);
+      }
+    }
+  }
+
+  function avgCycleTime(arr) {
+    if (!arr || arr.length === 0) return null;
+    return +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
+  }
+
+  const result = {};
+  for (const [month, data] of Object.entries(months)) {
+    result[month] = {
+      resolved: data.resolved,
+      points: data.points,
+      avgCycleTimeDays: avgCycleTime(data.cycleTimes),
+      byOrg: {},
+      byTeam: {}
+    };
+    for (const [key, d] of Object.entries(data.byOrg)) {
+      result[month].byOrg[key] = { resolved: d.resolved, points: d.points, avgCycleTimeDays: avgCycleTime(d.cycleTimes) };
+    }
+    for (const [key, d] of Object.entries(data.byTeam)) {
+      result[month].byTeam[key] = { resolved: d.resolved, points: d.points, avgCycleTimeDays: avgCycleTime(d.cycleTimes) };
+    }
+  }
+
+  return result;
+}
 
 // ─── Routes: Annotations ───
 
