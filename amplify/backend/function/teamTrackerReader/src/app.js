@@ -386,11 +386,11 @@ app.post('/roster/refresh', async function (req, res) {
     const command = new InvokeCommand({
       FunctionName: refresherName,
       InvocationType: 'Event',
-      Payload: JSON.stringify({ type: 'roster-refresh', members: memberNames })
+      Payload: JSON.stringify({ type: 'roster-refresh', members: memberNames, force: req.query.force === 'true' })
     });
     await lambdaClient.send(command);
 
-    res.json({ status: 'started', memberCount: memberNames.length });
+    res.json({ status: 'started', memberCount: memberNames.length, force: req.query.force === 'true' });
   } catch (error) {
     console.error('Roster refresh error:', error);
     res.status(500).json({ error: error.message });

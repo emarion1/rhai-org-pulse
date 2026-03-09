@@ -11,7 +11,7 @@
             <!-- Refresh All -->
             <button
               v-if="authUser"
-              @click="handleRefreshAll"
+              @click="handleRefreshAll($event)"
               :disabled="isRefreshing"
               class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-md font-medium hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 border border-primary-400"
             >
@@ -353,15 +353,16 @@ export default {
       this.updateHash()
     },
 
-    async handleRefreshAll() {
+    async handleRefreshAll(event) {
+      const force = event?.shiftKey || false
       this.isRefreshing = true
       try {
         await Promise.all([
-          refreshAllMetrics(),
+          refreshAllMetrics({ force }),
           this.refreshStats(),
           refreshTrendsGithub()
         ])
-        this.showToast('Refresh started — data will update shortly')
+        this.showToast(force ? 'Hard refresh started — ignoring cache' : 'Refresh started — data will update shortly')
       } catch (err) {
         console.error('Failed to start refresh:', err)
         this.showToast('Failed to start refresh', 'error')

@@ -6,7 +6,7 @@ const ssmClient = new SSMClient({ region: process.env.REGION || 'us-east-1' });
 exports.handler = async function (event) {
   console.log('Refresher Lambda invoked:', JSON.stringify(event));
 
-  const { type, members } = event;
+  const { type, members, force } = event;
 
   if (!type || !Array.isArray(members) || members.length === 0) {
     console.error('Invalid event: expected { type, members[] }');
@@ -24,7 +24,7 @@ exports.handler = async function (event) {
     const ssmResponse = await ssmClient.send(ssmCommand);
     const jiraToken = ssmResponse.Parameter.Value;
 
-    await refreshPersonMetrics({ jiraToken, members });
+    await refreshPersonMetrics({ jiraToken, members, force: !!force });
 
     return { statusCode: 200, body: `Refreshed ${members.length} members (${type})` };
   } catch (error) {

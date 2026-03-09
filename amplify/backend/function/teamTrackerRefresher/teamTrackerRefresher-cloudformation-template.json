@@ -106,7 +106,7 @@
           ]
         },
         "Runtime": "nodejs18.x",
-        "Timeout": 300,
+        "Timeout": 900,
         "MemorySize": 512
       }
     },

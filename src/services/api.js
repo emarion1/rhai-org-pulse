@@ -179,8 +179,8 @@ export async function getTeamMetrics(teamKey, onData) {
   return cachedRequest(`team:${teamKey}`, `/team/${encodeURIComponent(teamKey)}/metrics`, onData)
 }
 
-export async function refreshAllMetrics() {
-  return apiRequest('/roster/refresh', {
+export async function refreshAllMetrics({ force = false } = {}) {
+  return apiRequest(`/roster/refresh${force ? '?force=true' : ''}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   })

@@ -3,7 +3,8 @@ const { readFromS3, writeToS3 } = require('./s3-storage');
 const { fetchPersonMetrics } = require('./person-metrics');
 
 const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
-const CONCURRENCY = 3;
+const CONCURRENCY = 5;
+const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 function sanitizeFilename(name) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -13,7 +14,7 @@ function sanitizeFilename(name) {
  * Refresh person metrics for a list of Jira display names.
  * Fetches from Jira with concurrency-limited workers and writes results to S3.
  */
-async function refreshPersonMetrics({ jiraToken, members }) {
+async function refreshPersonMetrics({ jiraToken, members, force = false }) {
   console.log(`Starting person metrics refresh for ${members.length} members`);
 
   // Load name resolution cache
@@ -56,13 +57,28 @@ async function refreshPersonMetrics({ jiraToken, members }) {
     while (index < members.length) {
       const memberName = members[index++];
       try {
+        const key = sanitizeFilename(memberName);
+        const cachePath = `people/${key}.json`;
+
+        // Skip members whose cache is still fresh (unless force refresh)
+        if (!force) {
+          const cached = await readFromS3(cachePath);
+          if (cached && cached.fetchedAt) {
+            const age = Date.now() - new Date(cached.fetchedAt).getTime();
+            if (age < CACHE_TTL_MS) {
+              console.log(`[refresh] Skipping ${memberName} (cache is ${Math.round(age / 60000)}m old)`);
+              completed++;
+              continue;
+            }
+          }
+        }
+
         console.log(`[refresh] Fetching metrics for ${memberName} (${completed + failed + 1}/${members.length})`);
         const metrics = await fetchPersonMetrics(jiraRequest, memberName, { nameCache });
         if (metrics._resolvedName) {
           delete metrics._resolvedName;
         }
-        const key = sanitizeFilename(memberName);
-        await writeToS3(`people/${key}.json`, metrics);
+        await writeToS3(cachePath, metrics);
         completed++;
       } catch (error) {
         console.error(`[refresh] Failed for ${memberName}:`, error.message);
