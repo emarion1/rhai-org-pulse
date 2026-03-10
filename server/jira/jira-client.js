@@ -5,7 +5,7 @@
  * Returns { fetchBoards, fetchSprints, fetchSprintReport }.
  */
 
-function createJiraClient({ jiraRequest, jiraHost }) {
+function createJiraClient({ jiraRequest, jiraHost: _jiraHost }) {
   /**
    * Fetch all scrum boards for the RHOAIENG project (paginated)
    */

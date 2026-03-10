@@ -2,7 +2,27 @@
 
 Internal dashboard for tracking AI Platform engineering team productivity across Jira and GitHub.
 
-## Quick Start
+## Quick Start (Demo Mode)
+
+New contributors can get the app running in 3 commands without any Jira, GitHub, or Firebase credentials:
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Create .env with demo mode enabled
+echo "DEMO_MODE=true" > .env
+echo "VITE_DEMO_MODE=true" >> .env
+
+# 3. Start dev servers
+npm run dev:full
+```
+
+Open http://localhost:5173. You'll see the dashboard with sample fixture data.
+
+## Quick Start (Full Setup)
+
+For full functionality with real Jira and GitHub data:
 
 ```bash
 # 1. Install dependencies
@@ -19,6 +39,8 @@ npm run dev:full
 Open http://localhost:5173. The backend runs on port 3001, proxied via Vite.
 
 ## Prerequisites
+
+For full setup (demo mode has no prerequisites):
 
 - Node.js 18+
 - A Jira Personal Access Token (issues.redhat.com)

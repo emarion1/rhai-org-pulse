@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { computeCycleTimeDays, findWorkStartDate, fetchPersonMetrics, resolveJiraDisplayName } from '../person-metrics'
+import { computeCycleTimeDays, findWorkStartDate, fetchPersonMetrics } from '../person-metrics'
 
 function makeIssue({ created, resolutiondate, histories }) {
   return {

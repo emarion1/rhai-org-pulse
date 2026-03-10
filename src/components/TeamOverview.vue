@@ -161,7 +161,7 @@ const props = defineProps({
   sprints: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['select-sprint'])
+defineEmits(['select-sprint'])
 
 const selectedAssignee = ref(null)
 const annotationsCache = ref({})

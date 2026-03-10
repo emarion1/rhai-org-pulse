@@ -125,7 +125,7 @@ async function resolveJiraDisplayName(jiraRequest, rosterName, nameCache) {
       nameCache[rosterName] = rosterName;
       return rosterName;
     }
-  } catch (err) {
+  } catch {
     // If the check itself fails, fall through to user search
   }
 
@@ -164,7 +164,7 @@ async function tryUserSearch(jiraRequest, query, lastName) {
       u.displayName?.toLowerCase().endsWith(lastName.toLowerCase())
     );
     return match?.displayName || null;
-  } catch (err) {
+  } catch {
     return null;
   }
 }

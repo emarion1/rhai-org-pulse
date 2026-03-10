@@ -54,12 +54,11 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
 import SprintOverview from './SprintOverview.vue'
 import TrendChart from './TrendChart.vue'
 import AssigneeBreakdown from './AssigneeBreakdown.vue'
 
-const props = defineProps({
+defineProps({
   sprintData: { type: Object, default: null },
   trendData: { type: Array, default: null },
   trendLabels: { type: Array, default: () => [] }

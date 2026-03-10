@@ -12,13 +12,20 @@
  */
 
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const fetch = require('node-fetch');
-const { readFromStorage, writeToStorage } = require('./storage');
+
+// Demo mode: use fixtures instead of data directory
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+const storageModule = DEMO_MODE ? require('./demo-storage') : require('./storage');
+const { readFromStorage, writeToStorage, listStorageFiles } = storageModule;
+
 const { createJiraClient } = require('./jira/jira-client');
 const { discoverBoards, performRefresh } = require('./jira/orchestration');
 const { fetchPersonMetrics } = require('./jira/person-metrics');
+
+if (DEMO_MODE) {
+  console.log('🎭 Running in DEMO MODE - using fixture data, Jira/GitHub APIs disabled');
+}
 
 // Firebase Admin for production token verification
 let firebaseAdmin = null;
@@ -39,6 +46,19 @@ app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   next();
 });
+
+// Demo mode: block refresh routes that would call external APIs
+if (DEMO_MODE) {
+  app.use(function(req, res, next) {
+    if (req.method === 'POST' && req.path.includes('refresh')) {
+      return res.json({
+        status: 'skipped',
+        message: 'Refresh disabled in demo mode - using fixture data'
+      });
+    }
+    next();
+  });
+}
 
 const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
 const PORT = process.env.API_PORT || 3001;
@@ -492,9 +512,7 @@ function sanitizeFilename(name) {
 }
 
 function readRosterFull() {
-  const rosterPath = path.join(__dirname, '..', 'data', 'org-roster-full.json');
-  const raw = fs.readFileSync(rosterPath, 'utf8');
-  return JSON.parse(raw);
+  return readFromStorage('org-roster-full.json');
 }
 
 /**
@@ -585,15 +603,13 @@ app.get('/api/roster', function(req, res) {
 
 app.get('/api/people/metrics', function(req, res) {
   try {
-    const fs = require('fs');
-    const peoplePath = path.join(__dirname, '..', 'data', 'people');
-    if (!fs.existsSync(peoplePath)) return res.json({});
+    const files = listStorageFiles('people');
+    if (files.length === 0) return res.json({});
 
     const result = {};
-    const files = fs.readdirSync(peoplePath).filter(f => f.endsWith('.json'));
     for (const file of files) {
       try {
-        const data = JSON.parse(fs.readFileSync(path.join(peoplePath, file), 'utf8'));
+        const data = readFromStorage(`people/${file}`);
         if (data.jiraDisplayName) {
           result[data.jiraDisplayName] = {
             resolvedCount: data.resolved?.count ?? 0,
@@ -603,7 +619,7 @@ app.get('/api/people/metrics', function(req, res) {
             fetchedAt: data.fetchedAt
           };
         }
-      } catch (e) {
+      } catch {
         // skip malformed files
       }
     }
@@ -889,7 +905,6 @@ app.delete('/api/jira-name-cache', function(req, res) {
 const { fetchContributions } = require('./github/contributions');
 
 const GITHUB_CACHE_PATH = 'github-contributions.json';
-const GITHUB_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 function readGithubCache() {
   return readFromStorage(GITHUB_CACHE_PATH) || { users: {}, fetchedAt: null };
@@ -994,9 +1009,8 @@ function readGithubHistoryCache() {
  * Returns monthly buckets with resolved counts, points, and cycle times.
  */
 function buildJiraTrends() {
-  const fs = require('fs');
-  const peoplePath = path.join(__dirname, '..', 'data', 'people');
-  if (!fs.existsSync(peoplePath)) return {};
+  const files = listStorageFiles('people');
+  if (files.length === 0) return {};
 
   const roster = deriveRoster();
 
@@ -1015,11 +1029,10 @@ function buildJiraTrends() {
 
   // Read all person metrics and extract resolved issues
   const monthlyData = {}; // "YYYY-MM" -> { resolved, points, cycleTimes, byOrg, byTeam, byPerson }
-  const files = fs.readdirSync(peoplePath).filter(f => f.endsWith('.json'));
 
   for (const file of files) {
     try {
-      const data = JSON.parse(fs.readFileSync(path.join(peoplePath, file), 'utf8'));
+      const data = readFromStorage(`people/${file}`);
       if (!data.resolved?.issues) continue;
 
       const personName = data.jiraDisplayName;
@@ -1074,7 +1087,7 @@ function buildJiraTrends() {
           bucket.byPerson[personName].cycleTimes.push(issue.cycleTimeDays);
         }
       }
-    } catch (e) {
+    } catch {
       // skip malformed files
     }
   }

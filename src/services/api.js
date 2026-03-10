@@ -92,7 +92,7 @@ async function getAuthToken() {
     return await getIdToken()
   } catch (error) {
     console.error('Failed to get auth token:', error)
-    throw new Error('Authentication required. Please sign in again.')
+    throw new Error('Authentication required. Please sign in again.', { cause: error })
   }
 }
 

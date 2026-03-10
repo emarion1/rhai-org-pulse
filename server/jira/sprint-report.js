@@ -34,7 +34,7 @@ function getStoryPoints(issue) {
 /**
  * Normalize a sprint report issue into our Issue model.
  */
-function normalizeIssue(rawIssue, { jiraHost, addedKeys, completedKeys }) {
+function normalizeIssue(rawIssue, { jiraHost, addedKeys, completedKeys: _completedKeys }) {
   const typeName = rawIssue.typeName || TYPE_ID_MAP[rawIssue.typeId] || rawIssue.typeId || '';
   const storyPoints = getStoryPoints(rawIssue);
   const isEstimated = storyPoints != null && storyPoints > 0;

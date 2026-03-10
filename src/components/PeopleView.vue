@@ -154,7 +154,7 @@ import { useRoster } from '../composables/useRoster'
 import { useGithubStats } from '../composables/useGithubStats'
 import { getAllPeopleMetrics } from '../services/api'
 
-const { orgs, teams: allTeams, selectedOrgKey, selectOrg } = useRoster()
+const { orgs } = useRoster()
 const { getContributions } = useGithubStats()
 
 const selectedOrgKeys = ref([])

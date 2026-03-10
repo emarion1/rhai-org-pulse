@@ -247,7 +247,7 @@ function computeRollingMetrics(sprintResults, count = ROLLING_SPRINT_COUNT) {
 /**
  * Full refresh: process all enabled boards and generate dashboard summary.
  */
-async function performRefresh({ hardRefresh, fetchBoards, fetchSprints, fetchSprintReport, readStorage, writeStorage, jiraHost, onProgress }) {
+async function performRefresh({ hardRefresh, fetchBoards: _fetchBoards, fetchSprints, fetchSprintReport, readStorage, writeStorage, jiraHost, onProgress }) {
   console.log(`Starting refresh (hardRefresh: ${hardRefresh})`);
   const refreshStart = Date.now();
 
@@ -266,7 +266,7 @@ async function performRefresh({ hardRefresh, fetchBoards, fetchSprints, fetchSpr
 
   // Also update boards list
   const boardsData = readStorage('boards.json');
-  const allBoards = boardsData?.boards || [];
+  const _allBoards = boardsData?.boards || [];
 
   // Process boards with concurrency limit of 2
   const CONCURRENCY = 2;

@@ -102,7 +102,7 @@ function extractGithubFromSocialUrls(entry) {
 
   const list = Array.isArray(urls) ? urls : [urls]
   for (const url of list) {
-    const match = url.match(/^Github->https?:\/\/github\.com\/([^\/\s]+)\/?$/)
+    const match = url.match(/^Github->https?:\/\/github\.com\/([^/\s]+)\/?$/)
     if (match) return match[1]
   }
   return null

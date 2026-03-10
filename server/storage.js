@@ -48,8 +48,26 @@ function writeToStorage(key, data) {
   console.log(`Wrote ${key} to local storage`);
 }
 
+/**
+ * List JSON files in a subdirectory of storage
+ * @param {string} dir - Subdirectory name (e.g., 'people')
+ * @returns {string[]} Array of filenames (without path)
+ */
+function listStorageFiles(dir) {
+  const dirPath = path.join(DATA_DIR, dir);
+  try {
+    return fs.readdirSync(dirPath).filter(f => f.endsWith('.json'));
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
 module.exports = {
   readFromStorage,
   writeToStorage,
+  listStorageFiles,
   DATA_DIR
 };

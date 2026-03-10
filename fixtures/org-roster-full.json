@@ -1,0 +1,107 @@
+{
+  "vp": {
+    "name": "Demo VP",
+    "uid": "demovp",
+    "title": "VP of Engineering"
+  },
+  "orgs": {
+    "demoorg1": {
+      "leader": {
+        "name": "Alice Chen",
+        "uid": "achen",
+        "email": "achen@example.com",
+        "title": "Senior Engineering Manager",
+        "jiraTeam": "Platform",
+        "githubUsername": "alicechen",
+        "specialty": "backend"
+      },
+      "members": [
+        {
+          "name": "Bob Smith",
+          "uid": "bsmith",
+          "email": "bsmith@example.com",
+          "title": "Senior Software Engineer",
+          "jiraTeam": "Platform",
+          "githubUsername": "bobsmith",
+          "specialty": "backend"
+        },
+        {
+          "name": "Carol Williams",
+          "uid": "cwilliams",
+          "email": "cwilliams@example.com",
+          "title": "Software Engineer",
+          "jiraTeam": "Platform",
+          "githubUsername": "carolw",
+          "specialty": "fullstack"
+        },
+        {
+          "name": "David Lee",
+          "uid": "dlee",
+          "email": "dlee@example.com",
+          "title": "Principal Software Engineer",
+          "jiraTeam": "Infrastructure",
+          "githubUsername": "davidlee",
+          "specialty": "backend"
+        },
+        {
+          "name": "Emma Garcia",
+          "uid": "egarcia",
+          "email": "egarcia@example.com",
+          "title": "Software Engineer",
+          "jiraTeam": "Infrastructure",
+          "githubUsername": "emmagarcia",
+          "specialty": "devops"
+        }
+      ]
+    },
+    "demoorg2": {
+      "leader": {
+        "name": "Frank Johnson",
+        "uid": "fjohnson",
+        "email": "fjohnson@example.com",
+        "title": "Engineering Manager",
+        "jiraTeam": "ML Platform",
+        "githubUsername": "frankj",
+        "specialty": "ml"
+      },
+      "members": [
+        {
+          "name": "Grace Kim",
+          "uid": "gkim",
+          "email": "gkim@example.com",
+          "title": "Senior Software Engineer",
+          "jiraTeam": "ML Platform",
+          "githubUsername": "gracekim",
+          "specialty": "ml"
+        },
+        {
+          "name": "Henry Wilson",
+          "uid": "hwilson",
+          "email": "hwilson@example.com",
+          "title": "Software Engineer",
+          "jiraTeam": "ML Platform",
+          "githubUsername": "henryw",
+          "specialty": "ml"
+        },
+        {
+          "name": "Iris Martinez",
+          "uid": "imartinez",
+          "email": "imartinez@example.com",
+          "title": "Principal Software Engineer",
+          "jiraTeam": "Data Pipeline",
+          "githubUsername": "irism",
+          "specialty": "data"
+        },
+        {
+          "name": "Jack Brown",
+          "uid": "jbrown",
+          "email": "jbrown@example.com",
+          "title": "Software Engineer",
+          "jiraTeam": "Data Pipeline",
+          "githubUsername": "jackbrown",
+          "specialty": "backend"
+        }
+      ]
+    }
+  }
+}
