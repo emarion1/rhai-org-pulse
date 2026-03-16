@@ -22,6 +22,8 @@ const { readFromStorage, writeToStorage, listStorageFiles } = storageModule;
 const { createJiraClient } = require('./jira/jira-client');
 const { discoverBoards, performRefresh } = require('./jira/orchestration');
 const { fetchPersonMetrics } = require('./jira/person-metrics');
+const rosterSync = require('./roster-sync');
+const rosterSyncConfig = require('./roster-sync/config');
 
 if (DEMO_MODE) {
   console.log('Running in DEMO MODE - using fixture data, Jira/GitHub APIs disabled');
@@ -111,7 +113,7 @@ async function authMiddleware(req, res, next) {
 }
 
 // Whoami endpoint — returns current user info
-app.get('/whoami', function(req, res) {
+app.get('/api/whoami', function(req, res) {
   const email = req.headers['x-forwarded-email'];
   const displayName = req.headers['x-forwarded-preferred-username'] || req.headers['x-forwarded-user'] || email;
   if (email) {
@@ -527,14 +529,12 @@ function readRosterFull() {
  * Groups members by jiraTeam within each org leader's scope.
  * Returns { orgs: [ { key, leader, teams: { teamName: { displayName, members } } } ] }
  */
-const ORG_DISPLAY_NAMES = {
-  shgriffi: 'AI Platform',
-  crobson: 'AAET',
-  tgunders: 'AI Platform Core Components',
-  tibrahim: 'Inference Engineering',
-  kaixu: 'AI Innovation',
-  moromila: 'WatsonX.ai'
-};
+function getOrgDisplayNames() {
+  const fromConfig = rosterSyncConfig.getOrgDisplayNames(storageModule);
+  if (Object.keys(fromConfig).length > 0) return fromConfig;
+  // Fallback for backward compatibility with existing roster files
+  return {};
+}
 
 const EXCLUDED_TITLES = ['Intern', 'Collaborative Partner', 'Independent Contractor'];
 
@@ -586,7 +586,7 @@ function deriveRoster() {
 
     orgs.push({
       key: orgKey,
-      displayName: ORG_DISPLAY_NAMES[orgKey] || orgData.leader.name,
+      displayName: getOrgDisplayNames()[orgKey] || orgData.leader.name,
       leader: {
         name: orgData.leader.name,
         uid: orgData.leader.uid,
@@ -1509,12 +1509,114 @@ app.delete('/api/allowlist/:email', function(req, res) {
   }
 });
 
+// ─── Routes: Roster Sync Admin ───
+
+app.get('/api/admin/roster-sync/config', function(req, res) {
+  try {
+    const config = rosterSyncConfig.loadConfig(storageModule);
+    if (!config) {
+      return res.json({ configured: false });
+    }
+    res.json({ configured: true, ...config });
+  } catch (error) {
+    console.error('Read roster-sync config error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/roster-sync/config', function(req, res) {
+  try {
+    const { orgRoots, googleSheetId, sheetNames } = req.body;
+
+    if (!orgRoots || !Array.isArray(orgRoots) || orgRoots.length === 0) {
+      return res.status(400).json({ error: 'At least one org root is required' });
+    }
+
+    for (const root of orgRoots) {
+      if (!root.uid || !root.displayName) {
+        return res.status(400).json({ error: 'Each org root must have uid and displayName' });
+      }
+    }
+
+    // Preserve sync metadata from existing config
+    const existing = rosterSyncConfig.loadConfig(storageModule) || {};
+    const config = {
+      orgRoots,
+      googleSheetId: googleSheetId || null,
+      sheetNames: sheetNames || [],
+      lastSyncAt: existing.lastSyncAt || null,
+      lastSyncStatus: existing.lastSyncStatus || null,
+      lastSyncError: existing.lastSyncError || null
+    };
+
+    rosterSyncConfig.saveConfig(storageModule, config);
+
+    // Schedule daily sync if not already running
+    if (!DEMO_MODE) {
+      rosterSync.scheduleDaily(storageModule);
+    }
+
+    res.json({ configured: true, ...config });
+  } catch (error) {
+    console.error('Save roster-sync config error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/roster-sync/trigger', function(req, res) {
+  try {
+    if (rosterSync.isSyncInProgress()) {
+      return res.json({ status: 'already_running' });
+    }
+
+    if (!rosterSyncConfig.isConfigured(storageModule)) {
+      return res.status(400).json({ error: 'Roster sync is not configured' });
+    }
+
+    // Start sync in background
+    rosterSync.runSync(storageModule).then(function(result) {
+      console.log('[roster-sync] On-demand sync result:', result.status);
+    }).catch(function(err) {
+      console.error('[roster-sync] On-demand sync error:', err);
+    });
+
+    res.json({ status: 'started' });
+  } catch (error) {
+    console.error('Trigger roster-sync error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/roster-sync/status', function(req, res) {
+  try {
+    const config = rosterSyncConfig.loadConfig(storageModule);
+    res.json({
+      configured: rosterSyncConfig.isConfigured(storageModule),
+      syncing: rosterSync.isSyncInProgress(),
+      lastSyncAt: config ? config.lastSyncAt : null,
+      lastSyncStatus: config ? config.lastSyncStatus : null,
+      lastSyncError: config ? config.lastSyncError : null
+    });
+  } catch (error) {
+    console.error('Roster-sync status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // CORS preflight
 app.options('/api/{*path}', function(req, res) { res.status(200).end(); });
 
 // ─── Start ───
 
 seedAllowlist();
+
+// Start daily roster sync if configured
+if (!DEMO_MODE && rosterSyncConfig.isConfigured(storageModule)) {
+  rosterSync.scheduleDaily(storageModule);
+  console.log('Roster sync: daily schedule active');
+} else if (!DEMO_MODE) {
+  console.log('Roster sync: not configured (visit Settings to set up)');
+}
 
 app.listen(PORT, function() {
   console.log(`\nTeam Tracker dev server running at http://localhost:${PORT}`);

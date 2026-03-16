@@ -22,22 +22,11 @@ Thumbs.db
 
 # Local dev data
 data/
+
+# Google Sheets service account key
+secrets/
 org-roster.json
 
-# Amplify environment-specific & generated
-amplify/team-provider-info.json
-amplify/#current-cloud-backend/
-amplify/.config/local-aws-info.json
-amplify/.config/local-env-info.json
-amplify/backend/amplify-meta.json
-amplify/backend/awscloudformation/
-amplify/backend/api/teamTrackerApi/build/
-amplify/backend/types/
-amplify/cli.json
-amplify/hooks/
-amplify-buildspec.yml
-src/amplifyconfiguration.json
-src/aws-exports.js
 output.txt
 
 # Claude Code (keep .claude/CLAUDE.md tracked for contributors)

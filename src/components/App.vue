@@ -48,6 +48,12 @@
         </nav>
       </header>
 
+      <!-- Setup Banner -->
+      <SetupBanner
+        v-if="authUser && currentView === 'dashboard'"
+        @go-settings="navigateToTab('settings')"
+      />
+
       <!-- Dashboard View -->
       <main v-if="currentView === 'dashboard'" class="relative">
         <Dashboard
@@ -98,6 +104,13 @@
         />
       </main>
 
+      <!-- Settings View -->
+      <main v-else-if="currentView === 'settings'">
+        <SettingsView
+          @toast="({ message, type }) => showToast(message, type)"
+        />
+      </main>
+
       <Toast
         v-for="toast in toasts"
         :key="toast.id"
@@ -119,6 +132,8 @@ import PeopleView from './PeopleView.vue'
 import ReportsView from './ReportsView.vue'
 import TrendsView from './TrendsView.vue'
 import UserManagement from './UserManagement.vue'
+import SettingsView from './SettingsView.vue'
+import SetupBanner from './SetupBanner.vue'
 import { useAuth } from '../composables/useAuth'
 import { useRoster } from '../composables/useRoster'
 import { useGithubStats } from '../composables/useGithubStats'
@@ -135,7 +150,9 @@ export default {
     TrendsView,
     TeamRosterView,
     Toast,
-    UserManagement
+    UserManagement,
+    SettingsView,
+    SetupBanner
   },
   setup() {
     const { user: authUser } = useAuth()
@@ -165,7 +182,8 @@ export default {
         { view: 'people', label: 'People' },
         { view: 'trends', label: 'Trends' },
         { view: 'reports', label: 'Reports' },
-        { view: 'user-management', label: 'Users' }
+        { view: 'user-management', label: 'Users' },
+        { view: 'settings', label: 'Settings' }
       ]
     }
   },
@@ -215,6 +233,8 @@ export default {
         hash = '#/reports'
       } else if (this.currentView === 'user-management') {
         hash = '#/users'
+      } else if (this.currentView === 'settings') {
+        hash = '#/settings'
       }
       if (window.location.hash !== hash) {
         window.location.hash = hash
@@ -259,6 +279,9 @@ export default {
         return
       } else if (parts[0] === 'users') {
         this.currentView = 'user-management'
+        return
+      } else if (parts[0] === 'settings') {
+        this.currentView = 'settings'
         return
       }
 
