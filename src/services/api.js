@@ -217,6 +217,31 @@ export async function deleteAnnotation(sprintId, assignee, annotationId) {
   })
 }
 
+// ─── Roster Sync Admin ───
+
+export async function getRosterSyncConfig() {
+  return apiRequest('/admin/roster-sync/config')
+}
+
+export async function saveRosterSyncConfig(data) {
+  return apiRequest('/admin/roster-sync/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+}
+
+export async function triggerRosterSync() {
+  return apiRequest('/admin/roster-sync/trigger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
+
+export async function getRosterSyncStatus() {
+  return apiRequest('/admin/roster-sync/status')
+}
+
 // ─── Allowlist ───
 
 export async function getAllowlist() {

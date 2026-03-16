@@ -62,6 +62,11 @@ export function useRoster() {
     selectedOrgKey.value = orgKey
   }
 
+  async function reloadRoster() {
+    rosterData.value = null
+    return loadRoster()
+  }
+
   async function loadRoster() {
     if (rosterData.value) return
     loading.value = true
@@ -94,6 +99,7 @@ export function useRoster() {
     multiTeamMembers,
     getTeamsForPerson,
     uniqueMemberCount,
-    loadRoster
+    loadRoster,
+    reloadRoster
   }
 }
