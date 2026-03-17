@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# CI overlay: extends the local overlay with DEMO_MODE enabled
+# Used by GitHub Actions smoke tests — no real Jira/GitHub APIs needed
+
+namespace: team-tracker
+
+resources:
+  - ../local
+
+patches:
+  # Enable DEMO_MODE on the backend so it uses fixture data
+  - target:
+      kind: Deployment
+      name: backend
+    path: backend-demo-mode-patch.yaml
