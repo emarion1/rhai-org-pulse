@@ -114,9 +114,11 @@ npm run build        # Production build
 - **Hosting**: OpenShift with ArgoCD
 - **Testing**: Vitest
 
-## Testing with Kind
+## Deployment
 
-To test the containerized deployment locally using a Kind (Kubernetes in Docker) cluster, see [deploy/KIND.md](deploy/KIND.md).
+The app is deployed to OpenShift via ArgoCD. See [deploy/OPENSHIFT.md](deploy/OPENSHIFT.md) for the full deployment guide, including building images on ARM Macs, creating secrets, and troubleshooting.
+
+For local testing with Kind (Kubernetes in Docker), see [deploy/KIND.md](deploy/KIND.md).
 
 ## Contributing
 
