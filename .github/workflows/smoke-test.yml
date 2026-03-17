@@ -39,7 +39,13 @@ jobs:
           kubectl create secret generic team-tracker-secrets \
             -n team-tracker \
             --from-literal=JIRA_EMAIL=ci-test@example.com \
-            --from-literal=JIRA_TOKEN=dummy-token-for-ci
+            --from-literal=JIRA_TOKEN=dummy-token-for-ci \
+            --from-literal=GITHUB_TOKEN=dummy-token
+
+          # Backend mounts this as a volume for Google Sheets API (not needed in DEMO_MODE)
+          kubectl create secret generic google-sa-key \
+            -n team-tracker \
+            --from-literal=service-account.json='{}'
 
       - name: Deploy application
         run: |
