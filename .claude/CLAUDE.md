@@ -87,7 +87,7 @@ For testing the containerized deployment locally, see `deploy/KIND.md`. The `dep
 
 ## Deployment
 
-Deployed to OpenShift via ArgoCD. Kustomize manifests in `deploy/openshift/`.
+Deployed to OpenShift via ArgoCD. Full deployment guide: `deploy/OPENSHIFT.md`.
 
 | Component | Image | Details |
 |-----------|-------|---------|
@@ -101,6 +101,16 @@ Secrets (created manually on cluster, not in git):
 - `team-tracker-secrets`: `JIRA_EMAIL`, `JIRA_TOKEN`, `GITHUB_TOKEN` (optional)
 - `frontend-proxy-cookie`: `session_secret`
 - `google-sa-key`: Google service account JSON key (mounted at `/etc/secrets/`)
+
+### Building images on ARM Macs
+Standard `--platform linux/amd64` builds fail: npm times out under QEMU, esbuild crashes. Workaround: build/install natively, then copy into amd64 base images. See `deploy/OPENSHIFT.md` step 3 for details. This works because the backend has no native Node addons (all pure JS).
+
+### Dev vs prod
+- **Dev overlay** removes `ADMIN_EMAILS` from the configmap. When empty, the first authenticated user is auto-added to the allowlist.
+- **Prod overlay** keeps `ADMIN_EMAILS` to pre-seed the allowlist with known admins.
+
+### Auth flow (production)
+OpenShift OAuth proxy (sidecar on frontend pod) authenticates users and sets `X-Forwarded-Email` / `X-Forwarded-User` headers. The backend reads `X-Forwarded-Email` and checks it against `data/allowlist.json`. If the allowlist is empty, the first request auto-adds the user.
 
 ## Project Structure
 
