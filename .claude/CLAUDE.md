@@ -81,6 +81,10 @@ Automated roster building that replaces manual scripts:
 - Frontend uses localStorage stale-while-revalidate pattern (prefix `tt_cache:`)
 - API functions accept an `onData` callback: called immediately with cached data, then again with fresh data
 
+## Local Kind Cluster
+
+For testing the containerized deployment locally, see `deploy/KIND.md`. The `deploy/openshift/overlays/local/` overlay strips OpenShift-specific resources (OAuth proxy, Route, ServiceAccount) and uses locally-built images with `imagePullPolicy: Never`. Cluster name is `team-tracker` (not the default `kind`). If using Podman: `export KIND_EXPERIMENTAL_PROVIDER=podman`.
+
 ## Deployment
 
 Deployed to OpenShift via ArgoCD. Kustomize manifests in `deploy/openshift/`.
