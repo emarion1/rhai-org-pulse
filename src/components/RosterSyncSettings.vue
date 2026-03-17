@@ -137,7 +137,6 @@ const emit = defineEmits(['toast'])
 
 const {
   config,
-  loading,
   saving,
   syncing,
   isConfigured,

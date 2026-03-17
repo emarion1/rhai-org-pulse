@@ -4,7 +4,7 @@
  */
 
 const ldap = require('ldapjs');
-const { LDAP_HOST, LDAP_BASE, LDAP_USER_BASE, LDAP_ATTRS, EXCLUDED_TITLES } = require('./constants');
+const { LDAP_HOST, LDAP_USER_BASE, LDAP_ATTRS, EXCLUDED_TITLES } = require('./constants');
 
 function createClient() {
   const client = ldap.createClient({
