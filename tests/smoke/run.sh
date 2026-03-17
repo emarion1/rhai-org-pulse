@@ -60,8 +60,10 @@ echo "━━━ TIER 1: Infrastructure Health ━━━"
 if command -v kubectl &> /dev/null && kubectl get ns team-tracker &> /dev/null 2>&1; then
   echo ""
   echo "  Checking pods..."
-  BACKEND_PHASE=$(kubectl get pods -n team-tracker -l component=backend -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "unknown")
-  FRONTEND_PHASE=$(kubectl get pods -n team-tracker -l component=frontend -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "unknown")
+  BACKEND_PHASE=$(kubectl get pods -n team-tracker -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null | grep backend | head -1 | awk '{print $2}')
+  FRONTEND_PHASE=$(kubectl get pods -n team-tracker -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' 2>/dev/null | grep frontend | head -1 | awk '{print $2}')
+  BACKEND_PHASE=${BACKEND_PHASE:-unknown}
+  FRONTEND_PHASE=${FRONTEND_PHASE:-unknown}
 
   if [ "$BACKEND_PHASE" = "Running" ]; then pass "Backend pod is Running"; else fail "Backend pod: $BACKEND_PHASE"; fi
   if [ "$FRONTEND_PHASE" = "Running" ]; then pass "Frontend pod is Running"; else fail "Frontend pod: $FRONTEND_PHASE"; fi
