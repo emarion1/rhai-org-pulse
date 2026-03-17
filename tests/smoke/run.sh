@@ -7,7 +7,9 @@
 # Usage: BACKEND_URL=http://localhost:3001 FRONTEND_URL=http://localhost:8080 ./run.sh
 # ─────────────────────────────────────────────────────────────────────
 
-set -euo pipefail
+set -uo pipefail
+# Note: not using set -e because individual test failures are tracked
+# via PASSED/FAILED counters, not exit codes.
 
 BACKEND_URL="${BACKEND_URL:-http://localhost:3001}"
 FRONTEND_URL="${FRONTEND_URL:-http://localhost:8080}"
@@ -72,8 +74,8 @@ echo "━━━ TIER 1: Infrastructure Health ━━━"
 if command -v kubectl &> /dev/null && kubectl get ns team-tracker &> /dev/null; then
   echo ""
   echo "  Checking pod status..."
-  BACKEND_READY=$(kubectl get pods -n team-tracker -l app=backend -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo "unknown")
-  FRONTEND_READY=$(kubectl get pods -n team-tracker -l app=frontend -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo "unknown")
+  BACKEND_READY=$(kubectl get pods -n team-tracker -l app=team-tracker,component=backend -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo "unknown")
+  FRONTEND_READY=$(kubectl get pods -n team-tracker -l app=team-tracker,component=frontend -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo "unknown")
 
   if [ "$BACKEND_READY" = "true" ]; then pass "Backend pod is ready"; else fail "Backend pod not ready ($BACKEND_READY)"; fi
   if [ "$FRONTEND_READY" = "true" ]; then pass "Frontend pod is ready"; else fail "Frontend pod not ready ($FRONTEND_READY)"; fi
