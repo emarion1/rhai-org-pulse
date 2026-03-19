@@ -1,5 +1,5 @@
 <template>
-  <div class="container mx-auto px-6 py-6">
+  <div>
     <!-- Header -->
     <div class="flex items-center justify-between mb-6">
       <div class="flex items-center gap-3">
@@ -19,9 +19,10 @@
       </div>
       <div class="flex items-center gap-3">
         <button
-          @click="handleRefresh"
-          :disabled="true"
-          title="Refreshes temporarily disabled — Jira is down"
+          v-if="isAdmin"
+          @click="showRefreshModal = true"
+          :disabled="isRefreshing"
+          title="Refresh all metrics for this team"
           class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-md font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
         >
           <svg class="h-4 w-4" :class="{ 'animate-spin': isRefreshing }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -111,6 +112,13 @@
       :issues="teamMetrics?.resolvedIssues || []"
       @close="showResolvedIssues = false"
     />
+
+    <RefreshModal
+      v-if="showRefreshModal"
+      :scopeLabel="`Refresh data for team &quot;${team.displayName}&quot; (${uniqueCount} members)`"
+      @confirm="handleRefreshConfirm"
+      @cancel="showRefreshModal = false"
+    />
   </div>
 </template>
 
@@ -121,11 +129,13 @@ import PersonTable from './PersonTable.vue'
 import ViewToggle from './ViewToggle.vue'
 import MetricCard from './MetricCard.vue'
 import ResolvedIssuesModal from './ResolvedIssuesModal.vue'
+import RefreshModal from './RefreshModal.vue'
 import { useViewPreference } from '../composables/useViewPreference'
 import { useRoster } from '../composables/useRoster'
 import { useGithubStats } from '../composables/useGithubStats'
 import { useGitlabStats } from '../composables/useGitlabStats'
-import { refreshTeamMetrics, getTeamMetrics } from '../services/api'
+import { useAuth } from '../composables/useAuth'
+import { refreshMetrics, getTeamMetrics } from '../services/api'
 
 const props = defineProps({
   team: { type: Object, required: true }
@@ -136,9 +146,11 @@ const { viewPreference: viewPref } = useViewPreference()
 const { multiTeamMembers, getTeamsForPerson } = useRoster()
 const { getContributions } = useGithubStats()
 const { getContributions: getGitlabContributions, loadGitlabStats } = useGitlabStats()
+const { isAdmin } = useAuth()
 const isRefreshing = ref(false)
 const teamMetrics = ref(null)
 const showResolvedIssues = ref(false)
+const showRefreshModal = ref(false)
 
 async function fetchTeamMetrics() {
   try {
@@ -227,10 +239,11 @@ function exportCsv() {
   URL.revokeObjectURL(url)
 }
 
-async function handleRefresh() {
+async function handleRefreshConfirm({ force, sources }) {
+  showRefreshModal.value = false
   isRefreshing.value = true
   try {
-    await refreshTeamMetrics(props.team.key)
+    await refreshMetrics({ scope: 'team', teamKey: props.team.key, force, sources })
   } catch (error) {
     console.error('Failed to refresh team metrics:', error)
   } finally {

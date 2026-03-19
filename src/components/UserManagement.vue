@@ -1,5 +1,5 @@
 <template>
-  <div class="container mx-auto px-6 py-8 max-w-2xl">
+  <div class="max-w-2xl">
     <div class="flex items-center gap-3 mb-6">
       <button
         @click="$emit('back')"
@@ -9,7 +9,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <h2 class="text-2xl font-bold text-gray-900">Manage Users</h2>
+      <h2 class="text-2xl font-bold text-gray-900">Manage Admins</h2>
     </div>
 
     <!-- Add user form -->
@@ -26,7 +26,7 @@
           :disabled="!canAdd"
           class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          Add User
+          Add Admin
         </button>
       </form>
       <p v-if="addError" class="mt-2 text-sm text-red-600">{{ addError }}</p>
@@ -34,7 +34,7 @@
 
     <!-- Loading state -->
     <div v-if="loading" class="text-center py-8 text-gray-500">
-      Loading users...
+      Loading admins...
     </div>
 
     <!-- User list -->
@@ -57,7 +57,7 @@
           v-if="email !== currentUserEmail"
           @click="confirmRemove(email)"
           class="p-1 text-gray-400 hover:text-red-600 transition-colors"
-          title="Remove user"
+          title="Remove admin"
         >
           <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -65,7 +65,7 @@
         </button>
       </div>
       <div v-if="sortedEmails.length === 0" class="px-4 py-8 text-center text-gray-500 text-sm">
-        No users on the allowlist.
+        No admins configured.
       </div>
     </div>
 
@@ -77,11 +77,11 @@
     >
       <div class="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4" @click.stop>
         <div class="px-6 py-4 border-b border-gray-200">
-          <h3 class="text-lg font-semibold text-gray-900">Remove User</h3>
+          <h3 class="text-lg font-semibold text-gray-900">Remove Admin</h3>
         </div>
         <div class="px-6 py-4">
           <p class="text-sm text-gray-600">
-            Are you sure you want to remove <span class="font-medium text-gray-900">{{ emailToRemove }}</span> from the access list?
+            Are you sure you want to remove <span class="font-medium text-gray-900">{{ emailToRemove }}</span> from the admin list?
           </p>
         </div>
         <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">

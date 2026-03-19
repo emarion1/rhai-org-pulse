@@ -1,11 +1,11 @@
 /**
- * Local development server
+ * Team Tracker API server
  *
  * Combines fetcher and reader Express routes into a single
- * server, using local file storage instead of S3.
+ * server, using local file storage.
  *
  * Usage:
- *   JIRA_TOKEN=your-token node server/dev-server.js
+ *   JIRA_EMAIL=you@redhat.com JIRA_TOKEN=your-token node server/dev-server.js
  *
  * Or with a .env file:
  *   node -r dotenv/config server/dev-server.js
@@ -19,22 +19,25 @@ const DEMO_MODE = process.env.DEMO_MODE === 'true';
 const storageModule = DEMO_MODE ? require('./demo-storage') : require('./storage');
 const { readFromStorage, writeToStorage, listStorageFiles } = storageModule;
 
-const { createJiraClient } = require('./jira/jira-client');
-const { discoverBoards, performRefresh } = require('./jira/orchestration');
 const { fetchPersonMetrics } = require('./jira/person-metrics');
+const { fetchGithubData } = require('./github/contributions');
+const { fetchGitlabData } = require('./gitlab/contributions');
+const rosterSync = require('./roster-sync');
+const rosterSyncConfig = require('./roster-sync/config');
 
 if (DEMO_MODE) {
-  console.log('🎭 Running in DEMO MODE - using fixture data, Jira/GitHub APIs disabled');
+  console.log('Running in DEMO MODE - using fixture data, Jira/GitHub APIs disabled');
 }
 
-// Firebase Admin for production token verification
-let firebaseAdmin = null;
-if (process.env.NODE_ENV === 'production' || process.env.FIREBASE_AUTH === 'true') {
-  firebaseAdmin = require('firebase-admin');
-  if (!firebaseAdmin.apps.length) {
-    firebaseAdmin.initializeApp();
-  }
-}
+// ─── Refresh State Tracker ───
+
+const refreshState = {
+  running: false,
+  scope: null,
+  progress: { completed: 0, total: 0, errors: 0 },
+  sources: { jira: null, github: null, gitlab: null },
+  startedAt: null
+};
 
 const app = express();
 app.use(express.json());
@@ -60,22 +63,21 @@ if (DEMO_MODE) {
   });
 }
 
-const JIRA_HOST = process.env.JIRA_HOST || 'https://issues.redhat.com';
+const JIRA_HOST = process.env.JIRA_HOST || 'https://redhat.atlassian.net';
 const PORT = process.env.API_PORT || 3001;
 
-// ─── Allowlist seed ───
+// ─── Admin list seed ───
 
-function seedAllowlist() {
+function seedAdminList() {
   const existing = readFromStorage('allowlist.json');
   if (existing && existing.emails && existing.emails.length > 0) {
-    console.log(`Allowlist: ${existing.emails.length} user(s) loaded`);
+    console.log(`Admin list: ${existing.emails.length} admin(s) loaded`);
     return;
   }
 
   const adminEmails = process.env.ADMIN_EMAILS;
   if (!adminEmails) {
-    console.warn('WARNING: No allowlist.json and ADMIN_EMAILS not set — all API requests will 403');
-    writeToStorage('allowlist.json', { emails: [] });
+    console.log('Admin list: empty — first authenticated user will be auto-added as admin');
     return;
   }
 
@@ -85,71 +87,102 @@ function seedAllowlist() {
     .filter(Boolean);
 
   writeToStorage('allowlist.json', { emails });
-  console.log(`Allowlist: seeded with ${emails.length} email(s) from ADMIN_EMAILS`);
+  console.log(`Admin list: seeded with ${emails.length} admin(s) from ADMIN_EMAILS`);
 }
 
+function isAdmin(email) {
+  const adminList = readFromStorage('allowlist.json');
+  return adminList && adminList.emails && adminList.emails.includes(email);
+}
+
+// ─── Health check (before auth) ───
+
+app.get('/healthz', function(req, res) {
+  res.json({ status: 'ok' });
+});
+
 // ─── Auth middleware ───
+// In production, the OpenShift OAuth proxy sets X-Forwarded-Email/X-Forwarded-User headers.
+// In local dev, fall back to a hardcoded email.
 
 async function authMiddleware(req, res, next) {
   // Skip CORS preflight
   if (req.method === 'OPTIONS') return next();
 
-  // Determine user email
-  if (firebaseAdmin) {
-    // Production: verify Firebase ID token
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Missing or invalid authorization header' });
-    }
-    try {
-      const token = authHeader.split('Bearer ')[1];
-      const decoded = await firebaseAdmin.auth().verifyIdToken(token);
-      req.userEmail = decoded.email.toLowerCase();
-    } catch (err) {
-      console.error('[auth] Token verification failed:', err.message);
-      return res.status(401).json({ error: 'Invalid or expired token' });
-    }
+  const email = req.headers['x-forwarded-email'];
+  if (email) {
+    req.userEmail = email.toLowerCase();
   } else {
-    // Local dev: use hardcoded email
-    req.userEmail = 'local-dev@redhat.com';
+    // Local dev: use env-configured or hardcoded email
+    req.userEmail = (process.env.ADMIN_EMAILS || 'local-dev@redhat.com').split(',')[0].trim().toLowerCase();
   }
 
-  // Check allowlist
-  const allowlist = readFromStorage('allowlist.json');
-  if (!allowlist || !allowlist.emails.includes(req.userEmail)) {
-    return res.status(403).json({ error: 'Access denied. You are not on the allowlist.' });
+  // Auto-add first authenticated user as admin if admin list is empty
+  const adminList = readFromStorage('allowlist.json');
+  if (!adminList || !adminList.emails || adminList.emails.length === 0) {
+    const seeded = { emails: [req.userEmail] };
+    writeToStorage('allowlist.json', seeded);
+    console.log(`Admin list: auto-added first user ${req.userEmail}`);
   }
 
+  req.isAdmin = isAdmin(req.userEmail);
   next();
 }
+
+function requireAdmin(req, res, next) {
+  if (!req.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required.' });
+  }
+  next();
+}
+
+// Whoami endpoint — returns current user info
+app.get('/api/whoami', function(req, res) {
+  const email = req.headers['x-forwarded-email'];
+  const displayName = req.headers['x-forwarded-preferred-username'] || req.headers['x-forwarded-user'] || email;
+  if (email) {
+    res.json({ email, displayName, isAdmin: isAdmin(email.toLowerCase()) });
+  } else {
+    // Local dev fallback
+    const devEmail = (process.env.ADMIN_EMAILS || 'local-dev@redhat.com').split(',')[0].trim();
+    res.json({ email: devEmail, displayName: devEmail.split('@')[0], isAdmin: isAdmin(devEmail.toLowerCase()) });
+  }
+});
 
 app.use(authMiddleware);
 
 // ─── Jira API helpers ───
 
-function getJiraToken() {
+function getJiraAuth() {
   const token = process.env.JIRA_TOKEN;
-  if (!token) {
+  const email = process.env.JIRA_EMAIL;
+  if (!token || !email) {
     throw new Error(
-      'JIRA_TOKEN environment variable is not set.\n' +
-      'Set it in a .env file or pass it directly:\n' +
-      '  JIRA_TOKEN=your-token node server/dev-server.js'
+      'JIRA_TOKEN and JIRA_EMAIL environment variables must be set.\n' +
+      'Set them in a .env file or pass them directly:\n' +
+      '  JIRA_EMAIL=you@redhat.com JIRA_TOKEN=your-api-token node server/dev-server.js'
     );
   }
-  return token;
+  return Buffer.from(`${email}:${token}`).toString('base64');
 }
 
-async function jiraRequest(path) {
-  const token = getJiraToken();
+async function jiraRequest(path, { method = 'GET', body } = {}) {
+  const auth = getJiraAuth();
   const MAX_RETRIES = 3;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(`${JIRA_HOST}${path}`, {
+    const options = {
+      method,
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Basic ${auth}`,
         'Accept': 'application/json'
       }
-    });
+    };
+    if (body) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(`${JIRA_HOST}${path}`, options);
 
     if (response.status === 429 && attempt < MAX_RETRIES) {
       const retryAfter = parseInt(response.headers.get('retry-after'), 10);
@@ -168,77 +201,376 @@ async function jiraRequest(path) {
   }
 }
 
-// Create Jira client
-const jiraClient = createJiraClient({ jiraRequest, jiraHost: JIRA_HOST });
+// ─── Cache paths ───
 
-const orchestrationDeps = {
-  ...jiraClient,
-  readStorage: readFromStorage,
-  writeStorage: writeToStorage
-};
+const GITHUB_CACHE_PATH = 'github-contributions.json';
+const GITHUB_HISTORY_CACHE_PATH = 'github-history.json';
+const GITLAB_CACHE_PATH = 'gitlab-contributions.json';
+const GITLAB_HISTORY_CACHE_PATH = 'gitlab-history.json';
+const GITLAB_USER_ID_CACHE_PATH = 'gitlab-user-ids.json';
 
-// ─── Routes: Fetcher ───
+function readGithubCache() {
+  return readFromStorage(GITHUB_CACHE_PATH) || { users: {}, fetchedAt: null };
+}
 
-app.post('/api/discover-boards', async function(req, res) {
-  try {
-    console.log('\nDiscovering boards for project RHOAIENG');
-    const result = await discoverBoards(orchestrationDeps);
-    res.json(result);
-  } catch (error) {
-    console.error('Discover boards error:', error);
-    res.status(500).json({ error: error.message });
+function readGithubHistoryCache() {
+  return readFromStorage(GITHUB_HISTORY_CACHE_PATH) || { users: {}, fetchedAt: null };
+}
+
+function readGitlabCache() {
+  return readFromStorage(GITLAB_CACHE_PATH) || { users: {}, fetchedAt: null };
+}
+
+function readGitlabHistoryCache() {
+  return readFromStorage(GITLAB_HISTORY_CACHE_PATH) || { users: {}, fetchedAt: null };
+}
+
+function loadGitlabUserIdCache() {
+  return readFromStorage(GITLAB_USER_ID_CACHE_PATH) || {};
+}
+
+function saveGitlabUserIdCache(cache) {
+  writeToStorage(GITLAB_USER_ID_CACHE_PATH, cache);
+}
+
+/**
+ * Write single-pass GitHub/GitLab results to both contribution and history caches.
+ * Single-pass functions return { username: { totalContributions, months, fetchedAt } | null }.
+ * We store the full object in the contribution cache, and { months } in the history cache.
+ */
+function writeSinglePassResults(results, contribCachePath, historyCachePath) {
+  const contribCache = readFromStorage(contribCachePath) || { users: {}, fetchedAt: null };
+  const historyCache = readFromStorage(historyCachePath) || { users: {}, fetchedAt: null };
+  const now = new Date().toISOString();
+
+  for (const [username, data] of Object.entries(results)) {
+    if (data) {
+      contribCache.users[username] = data;
+      historyCache.users[username] = { months: data.months || {}, fetchedAt: data.fetchedAt };
+    }
   }
+
+  contribCache.fetchedAt = now;
+  historyCache.fetchedAt = now;
+  writeToStorage(contribCachePath, contribCache);
+  writeToStorage(historyCachePath, historyCache);
+}
+
+// ─── Routes: Unified Refresh ───
+
+app.get('/api/refresh/status', requireAdmin, function(req, res) {
+  res.json(refreshState);
 });
 
-app.post('/api/refresh', function(req, res) {
-  const hardRefresh = req.body.hardRefresh || false;
+app.post('/api/refresh', requireAdmin, async function(req, res) {
+  const { scope, name, teamKey, orgKey } = req.body || {};
+  const force = req.body?.force === true;
+  const sources = req.body?.sources || { jira: true, github: true, gitlab: true };
 
-  const teamsData = readFromStorage('teams.json');
-  const enabledTeams = teamsData?.teams?.filter(t => t.enabled !== false) || [];
+  // Validate scope
+  if (!scope || !['person', 'team', 'org', 'all'].includes(scope)) {
+    return res.status(400).json({ error: 'scope is required: person, team, org, or all' });
+  }
 
-  res.json({ status: 'started', boardCount: enabledTeams.length });
+  // Validate force
+  if (req.body?.force !== undefined && typeof req.body.force !== 'boolean') {
+    return res.status(400).json({ error: 'force must be a boolean' });
+  }
+
+  // Validate sources
+  if (req.body?.sources !== undefined) {
+    if (typeof req.body.sources !== 'object' || Array.isArray(req.body.sources)) {
+      return res.status(400).json({ error: 'sources must be an object with jira, github, gitlab boolean keys' });
+    }
+    const validKeys = ['jira', 'github', 'gitlab'];
+    for (const key of Object.keys(req.body.sources)) {
+      if (!validKeys.includes(key)) {
+        return res.status(400).json({ error: `Invalid source key: "${key}". Valid keys: ${validKeys.join(', ')}` });
+      }
+      if (typeof req.body.sources[key] !== 'boolean') {
+        return res.status(400).json({ error: `sources.${key} must be a boolean` });
+      }
+    }
+  }
+
+  // Overlap protection (person scope exempt — it's synchronous)
+  if (scope !== 'person' && refreshState.running) {
+    return res.status(409).json({
+      error: 'Refresh already in progress',
+      scope: refreshState.scope,
+      progress: refreshState.progress
+    });
+  }
+
+  const roster = deriveRoster();
+  let members;
+
+  // Resolve members based on scope
+  if (scope === 'person') {
+    let found = null;
+    for (const org of roster.orgs) {
+      for (const team of Object.values(org.teams)) {
+        found = team.members.find(m => m.jiraDisplayName === name || m.name === name);
+        if (found) break;
+      }
+      if (found) break;
+    }
+    if (!found) {
+      return res.status(404).json({ error: `Person "${name}" not found in roster` });
+    }
+    members = [found];
+  } else if (scope === 'team') {
+    let team = null;
+    const sepIdx = (teamKey || '').indexOf('::');
+    if (sepIdx !== -1) {
+      const oKey = teamKey.substring(0, sepIdx);
+      const tName = teamKey.substring(sepIdx + 2);
+      const org = roster.orgs.find(o => o.key === oKey);
+      if (org) team = org.teams[tName];
+    } else {
+      for (const org of roster.orgs) {
+        if (org.teams[teamKey]) { team = org.teams[teamKey]; break; }
+      }
+    }
+    if (!team) {
+      return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
+    }
+    members = dedupeMembers(team.members);
+  } else if (scope === 'org') {
+    const org = roster.orgs.find(o => o.key === orgKey);
+    if (!org) {
+      return res.status(404).json({ error: `Org "${orgKey}" not found in roster` });
+    }
+    const allMembers = [];
+    for (const team of Object.values(org.teams)) {
+      allMembers.push(...team.members);
+    }
+    members = dedupeMembers(allMembers);
+  } else {
+    // scope === 'all'
+    const allMembers = [];
+    for (const org of roster.orgs) {
+      for (const team of Object.values(org.teams)) {
+        allMembers.push(...team.members);
+      }
+    }
+    members = dedupeMembers(allMembers);
+  }
+
+  // Helper: refresh Jira for a list of members
+  async function refreshJiraMembers(memberList) {
+    if (!sources.jira || DEMO_MODE) return;
+    const CONCURRENCY = 3;
+    let idx = 0;
+    let completed = 0;
+
+    async function nextJira() {
+      if (idx >= memberList.length) return;
+      const member = memberList[idx++];
+      try {
+        completed++;
+        console.log(`[refresh] Jira: ${member.jiraDisplayName} (${completed}/${memberList.length})`);
+        const existingData = force ? null : readFromStorage(`people/${sanitizeFilename(member.jiraDisplayName)}.json`);
+        const metrics = await fetchPersonMetrics(jiraRequest, member.jiraDisplayName, {
+          nameCache: jiraNameCache,
+          existingData,
+          email: member.email
+        });
+        if (metrics._resolvedName) delete metrics._resolvedName;
+        writeToStorage(`people/${sanitizeFilename(member.jiraDisplayName)}.json`, metrics);
+        if (refreshState.sources.jira) refreshState.sources.jira.completed++;
+      } catch (err) {
+        console.error(`[refresh] Jira failed for ${member.jiraDisplayName}:`, err.message);
+        refreshState.progress.errors++;
+      }
+      return nextJira();
+    }
+
+    const workers = [];
+    for (let w = 0; w < CONCURRENCY; w++) workers.push(nextJira());
+    await Promise.all(workers);
+    persistNameCache();
+  }
+
+  // Helper: refresh GitHub for a list of usernames
+  async function refreshGithubUsers(usernames) {
+    if (!sources.github || usernames.length === 0) return;
+    try {
+      const existingCache = force ? {} : readGithubCache().users;
+      const results = await fetchGithubData(usernames, {
+        existingData: existingCache,
+        ttlMs: force ? 0 : undefined
+      });
+      writeSinglePassResults(results, GITHUB_CACHE_PATH, GITHUB_HISTORY_CACHE_PATH);
+      console.log(`[refresh] GitHub: ${Object.keys(results).length} users processed`);
+    } catch (err) {
+      console.error('[refresh] GitHub failed:', err.message);
+      refreshState.progress.errors++;
+    }
+  }
+
+  // Helper: refresh GitLab for a list of usernames
+  async function refreshGitlabUsers(usernames) {
+    if (!sources.gitlab || usernames.length === 0) return;
+    try {
+      const userIdCache = loadGitlabUserIdCache();
+      const existingCache = force ? {} : readGitlabCache().users;
+      const results = await fetchGitlabData(usernames, {
+        existingData: force ? {} : existingCache,
+        userIdCache
+      });
+      writeSinglePassResults(results, GITLAB_CACHE_PATH, GITLAB_HISTORY_CACHE_PATH);
+      saveGitlabUserIdCache(userIdCache);
+      console.log(`[refresh] GitLab: ${Object.keys(results).length} users processed`);
+    } catch (err) {
+      console.error('[refresh] GitLab failed:', err.message);
+      refreshState.progress.errors++;
+    }
+  }
+
+  // Collect unique GitHub/GitLab usernames
+  const githubUsernames = [...new Set(members.filter(m => m.githubUsername).map(m => m.githubUsername))];
+  const gitlabUsernames = [...new Set(members.filter(m => m.gitlabUsername).map(m => m.gitlabUsername))];
+
+  // For person scope: synchronous — return results directly
+  if (scope === 'person') {
+    try {
+      const member = members[0];
+      const result = { jira: null, github: null, gitlab: null };
+
+      const promises = [];
+
+      // Jira
+      if (sources.jira && !DEMO_MODE) {
+        promises.push((async () => {
+          const existingData = force ? null : readFromStorage(`people/${sanitizeFilename(member.jiraDisplayName)}.json`);
+          const metrics = await fetchPersonMetrics(jiraRequest, member.jiraDisplayName, {
+            nameCache: jiraNameCache,
+            existingData,
+            email: member.email
+          });
+          if (metrics._resolvedName) {
+            persistNameCache();
+            delete metrics._resolvedName;
+          }
+          writeToStorage(`people/${sanitizeFilename(member.jiraDisplayName)}.json`, metrics);
+          result.jira = metrics;
+        })());
+      }
+
+      // GitHub
+      if (sources.github && member.githubUsername) {
+        promises.push((async () => {
+          const existingCache = force ? {} : readGithubCache().users;
+          const ghResults = await fetchGithubData([member.githubUsername], {
+            existingData: existingCache,
+            ttlMs: force ? 0 : undefined
+          });
+          if (ghResults[member.githubUsername]) {
+            writeSinglePassResults(ghResults, GITHUB_CACHE_PATH, GITHUB_HISTORY_CACHE_PATH);
+            result.github = ghResults[member.githubUsername];
+          }
+        })());
+      }
+
+      // GitLab
+      if (sources.gitlab && member.gitlabUsername) {
+        promises.push((async () => {
+          const userIdCache = loadGitlabUserIdCache();
+          const existingCache = force ? {} : readGitlabCache().users;
+          const glResults = await fetchGitlabData([member.gitlabUsername], {
+            existingData: force ? {} : existingCache,
+            userIdCache
+          });
+          if (glResults[member.gitlabUsername]) {
+            writeSinglePassResults(glResults, GITLAB_CACHE_PATH, GITLAB_HISTORY_CACHE_PATH);
+            result.gitlab = glResults[member.gitlabUsername];
+          }
+          saveGitlabUserIdCache(userIdCache);
+        })());
+      }
+
+      await Promise.allSettled(promises);
+      saveLastRefreshed();
+      console.log(`[refresh] person "${member.jiraDisplayName}" complete`);
+      return res.json(result);
+    } catch (error) {
+      console.error(`[refresh] person "${name}" error:`, error);
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  // For team/org/all: background processing
+  refreshState.running = true;
+  refreshState.scope = scope;
+  refreshState.startedAt = new Date().toISOString();
+  refreshState.progress = { errors: 0 };
+  refreshState.sources = {
+    jira: sources.jira ? { status: 'pending', completed: 0, total: members.length } : { status: 'skipped' },
+    github: sources.github ? { status: 'pending', completed: 0, total: githubUsernames.length } : { status: 'skipped' },
+    gitlab: sources.gitlab ? { status: 'pending', completed: 0, total: gitlabUsernames.length } : { status: 'skipped' }
+  };
+
+  res.json({ status: 'started', memberCount: members.length });
 
   setImmediate(async () => {
     try {
-      console.log(`\nStarting refresh: ${enabledTeams.length} boards (hardRefresh: ${hardRefresh})`);
-      await performRefresh({ ...orchestrationDeps, hardRefresh });
-      console.log('Refresh complete');
-    } catch (error) {
-      console.error('Background refresh error:', error);
+      // Run all three sources concurrently
+      await Promise.allSettled([
+        (async () => {
+          if (!sources.jira) return;
+          refreshState.sources.jira.status = 'running';
+          try {
+            await refreshJiraMembers(members);
+            refreshState.sources.jira.status = 'done';
+          } catch (err) {
+            refreshState.sources.jira.status = 'error';
+            console.error('[refresh] Jira source error:', err.message);
+          }
+        })(),
+        (async () => {
+          if (!sources.github || githubUsernames.length === 0) return;
+          refreshState.sources.github.status = 'running';
+          try {
+            await refreshGithubUsers(githubUsernames);
+            refreshState.sources.github.status = 'done';
+          } catch (err) {
+            refreshState.sources.github.status = 'error';
+            console.error('[refresh] GitHub source error:', err.message);
+          }
+        })(),
+        (async () => {
+          if (!sources.gitlab || gitlabUsernames.length === 0) return;
+          refreshState.sources.gitlab.status = 'running';
+          try {
+            await refreshGitlabUsers(gitlabUsernames);
+            refreshState.sources.gitlab.status = 'done';
+          } catch (err) {
+            refreshState.sources.gitlab.status = 'error';
+            console.error('[refresh] GitLab source error:', err.message);
+          }
+        })()
+      ]);
+
+      saveLastRefreshed();
+      console.log(`[refresh] ${scope} complete (${members.length} members)`);
+    } catch (err) {
+      console.error(`[refresh] ${scope} error:`, err);
+    } finally {
+      refreshState.running = false;
     }
   });
 });
 
-app.get('/api/refresh/stream', function(req, res) {
-  const hardRefresh = req.query.hardRefresh === 'true';
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
+function dedupeMembers(members) {
+  const seen = new Set();
+  return members.filter(m => {
+    const key = m.jiraDisplayName || m.name;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-
-  let clientDisconnected = false;
-  req.on('close', () => { clientDisconnected = true; });
-
-  function sendEvent(data) {
-    if (!clientDisconnected) {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    }
-  }
-
-  performRefresh({
-    ...orchestrationDeps,
-    hardRefresh,
-    onProgress: sendEvent
-  }).then(() => {
-    if (!clientDisconnected) res.end();
-  }).catch((error) => {
-    console.error('SSE refresh error:', error);
-    sendEvent({ type: 'error', message: error.message });
-    if (!clientDisconnected) res.end();
-  });
-});
+}
 
 // ─── Routes: Reader ───
 
@@ -357,7 +689,7 @@ app.get('/api/teams', function(req, res) {
   }
 });
 
-app.post('/api/teams', function(req, res) {
+app.post('/api/teams', requireAdmin, function(req, res) {
   try {
     const { teams } = req.body;
     if (!teams || !Array.isArray(teams)) {
@@ -511,6 +843,10 @@ function sanitizeFilename(name) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '_');
 }
 
+function saveLastRefreshed() {
+  writeToStorage('last-refreshed.json', { timestamp: new Date().toISOString() });
+}
+
 function readRosterFull() {
   return readFromStorage('org-roster-full.json');
 }
@@ -520,14 +856,12 @@ function readRosterFull() {
  * Groups members by jiraTeam within each org leader's scope.
  * Returns { orgs: [ { key, leader, teams: { teamName: { displayName, members } } } ] }
  */
-const ORG_DISPLAY_NAMES = {
-  shgriffi: 'AI Platform',
-  crobson: 'AAET',
-  tgunders: 'AI Platform Core Components',
-  tibrahim: 'Inference Engineering',
-  kaixu: 'AI Innovation',
-  moromila: 'WatsonX.ai'
-};
+function getOrgDisplayNames() {
+  const fromConfig = rosterSyncConfig.getOrgDisplayNames(storageModule);
+  if (Object.keys(fromConfig).length > 0) return fromConfig;
+  // Fallback for backward compatibility with existing roster files
+  return {};
+}
 
 const EXCLUDED_TITLES = ['Intern', 'Collaborative Partner', 'Independent Contractor'];
 
@@ -542,8 +876,8 @@ function deriveRoster() {
 
     for (const person of allMembers) {
       // Split comma-separated team names so multi-team people appear in each team
-      const teamNames = person.jiraTeam
-        ? person.jiraTeam.split(',').map(t => t.trim()).filter(Boolean)
+      const teamNames = person.miroTeam
+        ? person.miroTeam.split(',').map(t => t.trim()).filter(Boolean)
         : ['_unassigned'];
 
       const memberEntry = {
@@ -579,7 +913,7 @@ function deriveRoster() {
 
     orgs.push({
       key: orgKey,
-      displayName: ORG_DISPLAY_NAMES[orgKey] || orgData.leader.name,
+      displayName: getOrgDisplayNames()[orgKey] || orgData.leader.name,
       leader: {
         name: orgData.leader.name,
         uid: orgData.leader.uid,
@@ -592,8 +926,17 @@ function deriveRoster() {
   return { vp: full.vp, orgs };
 }
 
+app.get('/api/last-refreshed', function(req, res) {
+  const data = readFromStorage('last-refreshed.json');
+  res.json({ timestamp: data?.timestamp || null });
+});
+
 app.get('/api/roster', function(req, res) {
   try {
+    const full = readRosterFull();
+    if (!full) {
+      return res.json({ orgs: [] });
+    }
     const roster = deriveRoster();
     res.json(roster);
   } catch (error) {
@@ -636,10 +979,9 @@ app.get('/api/person/:jiraDisplayName/metrics', async function(req, res) {
     const name = decodeURIComponent(req.params.jiraDisplayName);
     const key = sanitizeFilename(name);
     const cachePath = `people/${key}.json`;
-    const forceRefresh = req.query.refresh === 'true';
 
     // Check cache (4-hour TTL, or any age in demo mode)
-    const cached = (!forceRefresh || DEMO_MODE) ? readFromStorage(cachePath) : null;
+    const cached = readFromStorage(cachePath);
     if (cached) {
       if (DEMO_MODE || (cached.fetchedAt && (Date.now() - new Date(cached.fetchedAt).getTime()) < 4 * 60 * 60 * 1000)) {
         return res.json(cached);
@@ -650,9 +992,22 @@ app.get('/api/person/:jiraDisplayName/metrics', async function(req, res) {
       return res.status(404).json({ error: `No demo data for ${name}` });
     }
 
+    // Look up email from roster for more reliable Jira resolution
+    let personEmail = null;
+    try {
+      const roster = deriveRoster();
+      for (const org of roster.orgs) {
+        for (const team of Object.values(org.teams)) {
+          const found = team.members.find(m => m.jiraDisplayName === name || m.name === name);
+          if (found) { personEmail = found.email; break; }
+        }
+        if (personEmail) break;
+      }
+    } catch { /* roster lookup is best-effort */ }
+
     // Fetch from Jira, fall back to stale cache if Jira is unavailable
     try {
-      const metrics = await fetchPersonMetrics(jiraRequest, name, { nameCache: jiraNameCache });
+      const metrics = await fetchPersonMetrics(jiraRequest, name, { nameCache: jiraNameCache, email: personEmail });
       if (metrics._resolvedName) {
         persistNameCache();
         delete metrics._resolvedName;
@@ -774,151 +1129,13 @@ app.get('/api/team/:teamKey/metrics', function(req, res) {
   }
 });
 
-app.post('/api/roster/refresh', function(req, res) {
-  try {
-    const roster = deriveRoster();
-
-    // Collect unique members across all orgs and teams
-    const seen = new Set();
-    const uniqueMembers = [];
-    for (const org of roster.orgs) {
-      for (const team of Object.values(org.teams)) {
-        for (const member of team.members) {
-          if (!seen.has(member.jiraDisplayName)) {
-            seen.add(member.jiraDisplayName);
-            uniqueMembers.push(member);
-          }
-        }
-      }
-    }
-
-    res.json({ status: 'started', memberCount: uniqueMembers.length });
-
-    // Background fetch with concurrency limit of 3
-    setImmediate(async () => {
-      const CONCURRENCY = 3;
-      let i = 0;
-      let completed = 0;
-
-      async function next() {
-        if (i >= uniqueMembers.length) return;
-        const member = uniqueMembers[i++];
-        try {
-          console.log(`[roster-refresh] Fetching metrics for ${member.jiraDisplayName} (${++completed}/${uniqueMembers.length})`);
-          const metrics = await fetchPersonMetrics(jiraRequest, member.jiraDisplayName, { nameCache: jiraNameCache });
-          if (metrics._resolvedName) {
-            delete metrics._resolvedName;
-          }
-          const key = sanitizeFilename(member.jiraDisplayName);
-          writeToStorage(`people/${key}.json`, metrics);
-        } catch (error) {
-          console.error(`[roster-refresh] Failed for ${member.jiraDisplayName}:`, error.message);
-          completed++;
-        }
-        return next();
-      }
-
-      const workers = [];
-      for (let w = 0; w < CONCURRENCY; w++) {
-        workers.push(next());
-      }
-      await Promise.all(workers);
-      persistNameCache();
-      console.log(`[roster-refresh] All teams refresh complete (${uniqueMembers.length} members)`);
-    });
-  } catch (error) {
-    console.error('Roster refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/team/:teamKey/refresh', function(req, res) {
-  try {
-    const teamKey = decodeURIComponent(req.params.teamKey);
-    const roster = deriveRoster();
-
-    // teamKey format: "orgKey::teamName"
-    let team = null;
-    const sepIdx = teamKey.indexOf('::');
-    if (sepIdx !== -1) {
-      const orgKey = teamKey.substring(0, sepIdx);
-      const teamName = teamKey.substring(sepIdx + 2);
-      const org = roster.orgs.find(o => o.key === orgKey);
-      if (org) team = org.teams[teamName];
-    } else {
-      for (const org of roster.orgs) {
-        if (org.teams[teamKey]) {
-          team = org.teams[teamKey];
-          break;
-        }
-      }
-    }
-
-    if (!team) {
-      return res.status(404).json({ error: `Team "${teamKey}" not found in roster` });
-    }
-
-    // Deduplicate members by jiraDisplayName
-    const seen = new Set();
-    const uniqueMembers = team.members.filter(m => {
-      if (seen.has(m.jiraDisplayName)) return false;
-      seen.add(m.jiraDisplayName);
-      return true;
-    });
-
-    res.json({ status: 'started', memberCount: uniqueMembers.length });
-
-    // Background fetch with concurrency limit of 3
-    setImmediate(async () => {
-      const CONCURRENCY = 3;
-      let i = 0;
-
-      async function next() {
-        if (i >= uniqueMembers.length) return;
-        const member = uniqueMembers[i++];
-        try {
-          console.log(`[refresh] Fetching metrics for ${member.jiraDisplayName} (${i}/${uniqueMembers.length})`);
-          const metrics = await fetchPersonMetrics(jiraRequest, member.jiraDisplayName, { nameCache: jiraNameCache });
-          if (metrics._resolvedName) {
-            delete metrics._resolvedName;
-          }
-          const key = sanitizeFilename(member.jiraDisplayName);
-          writeToStorage(`people/${key}.json`, metrics);
-        } catch (error) {
-          console.error(`[refresh] Failed for ${member.jiraDisplayName}:`, error.message);
-        }
-        return next();
-      }
-
-      const workers = [];
-      for (let w = 0; w < CONCURRENCY; w++) {
-        workers.push(next());
-      }
-      await Promise.all(workers);
-      persistNameCache();
-      console.log(`[refresh] Team "${teamKey}" refresh complete`);
-    });
-  } catch (error) {
-    console.error(`Team refresh error (${req.params.teamKey}):`, error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.delete('/api/jira-name-cache', function(req, res) {
+app.delete('/api/jira-name-cache', requireAdmin, function(req, res) {
   jiraNameCache = {};
   writeToStorage('jira-name-map.json', {});
   res.json({ success: true });
 });
 
 // ─── Routes: GitHub Contributions ───
-
-const { fetchContributions } = require('./github/contributions');
-
-const GITHUB_CACHE_PATH = 'github-contributions.json';
-
-function readGithubCache() {
-  return readFromStorage(GITHUB_CACHE_PATH) || { users: {}, fetchedAt: null };
-}
 
 app.get('/api/github/contributions', function(req, res) {
   try {
@@ -942,82 +1159,7 @@ app.get('/api/github/contributions/:username', function(req, res) {
   }
 });
 
-app.post('/api/github/contributions/:username/refresh', function(req, res) {
-  try {
-    const username = decodeURIComponent(req.params.username);
-    const results = fetchContributions([username]);
-    const cache = readGithubCache();
-
-    if (results[username]) {
-      cache.users[username] = results[username];
-      writeToStorage(GITHUB_CACHE_PATH, cache);
-    }
-
-    res.json(results[username] || null);
-  } catch (error) {
-    console.error('GitHub single user refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/github/refresh', function(req, res) {
-  try {
-    const roster = deriveRoster();
-
-    // Collect all unique GitHub usernames across all orgs
-    const usernameMap = {}; // githubUsername -> person name
-    for (const org of roster.orgs) {
-      for (const team of Object.values(org.teams)) {
-        for (const member of team.members) {
-          if (member.githubUsername && !usernameMap[member.githubUsername]) {
-            usernameMap[member.githubUsername] = member.name;
-          }
-        }
-      }
-    }
-
-    const usernames = Object.keys(usernameMap);
-    res.json({ status: 'started', usernameCount: usernames.length });
-
-    // Fetch in background
-    setImmediate(() => {
-      try {
-        const results = fetchContributions(usernames);
-        const cache = readGithubCache();
-
-        for (const [username, data] of Object.entries(results)) {
-          if (data) {
-            cache.users[username] = data;
-          }
-        }
-        cache.fetchedAt = new Date().toISOString();
-
-        writeToStorage(GITHUB_CACHE_PATH, cache);
-        console.log(`[github] Refresh complete. ${Object.keys(results).length} users processed.`);
-      } catch (err) {
-        console.error('[github] Refresh failed:', err.message);
-      }
-    });
-  } catch (error) {
-    console.error('GitHub refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ─── Routes: GitLab Contributions ───
-
-const { fetchContributions: fetchGitlabContributions, fetchContributionHistory: fetchGitlabContributionHistory } = require('./gitlab/contributions');
-
-const GITLAB_CACHE_PATH = 'gitlab-contributions.json';
-const GITLAB_HISTORY_CACHE_PATH = 'gitlab-history.json';
-
-function readGitlabCache() {
-  return readFromStorage(GITLAB_CACHE_PATH) || { users: {}, fetchedAt: null };
-}
-
-function readGitlabHistoryCache() {
-  return readFromStorage(GITLAB_HISTORY_CACHE_PATH) || { users: {}, fetchedAt: null };
-}
 
 app.get('/api/gitlab/contributions', function(req, res) {
   try {
@@ -1041,115 +1183,7 @@ app.get('/api/gitlab/contributions/:username', function(req, res) {
   }
 });
 
-app.post('/api/gitlab/contributions/:username/refresh', async function(req, res) {
-  try {
-    const username = decodeURIComponent(req.params.username);
-    const results = await fetchGitlabContributions([username]);
-    const cache = readGitlabCache();
-
-    if (results[username]) {
-      cache.users[username] = results[username];
-      writeToStorage(GITLAB_CACHE_PATH, cache);
-    }
-
-    res.json(results[username] || null);
-  } catch (error) {
-    console.error('GitLab single user refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/gitlab/refresh', function(req, res) {
-  try {
-    const roster = deriveRoster();
-
-    // Collect all unique GitLab usernames across all orgs
-    const usernameMap = {}; // gitlabUsername -> person name
-    for (const org of roster.orgs) {
-      for (const team of Object.values(org.teams)) {
-        for (const member of team.members) {
-          if (member.gitlabUsername && !usernameMap[member.gitlabUsername]) {
-            usernameMap[member.gitlabUsername] = member.name;
-          }
-        }
-      }
-    }
-
-    const usernames = Object.keys(usernameMap);
-    res.json({ status: 'started', usernameCount: usernames.length });
-
-    // Fetch in background
-    setImmediate(async () => {
-      try {
-        const results = await fetchGitlabContributions(usernames);
-        const cache = readGitlabCache();
-
-        for (const [username, data] of Object.entries(results)) {
-          if (data) {
-            cache.users[username] = data;
-          }
-        }
-        cache.fetchedAt = new Date().toISOString();
-
-        writeToStorage(GITLAB_CACHE_PATH, cache);
-        console.log(`[gitlab] Refresh complete. ${Object.keys(results).length} users processed.`);
-      } catch (err) {
-        console.error('[gitlab] Refresh failed:', err.message);
-      }
-    });
-  } catch (error) {
-    console.error('GitLab refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/trends/gitlab/refresh', function(req, res) {
-  try {
-    const roster = deriveRoster();
-    const usernames = [];
-    for (const org of roster.orgs) {
-      for (const team of Object.values(org.teams)) {
-        for (const member of team.members) {
-          if (member.gitlabUsername && !usernames.includes(member.gitlabUsername)) {
-            usernames.push(member.gitlabUsername);
-          }
-        }
-      }
-    }
-
-    res.json({ status: 'started', usernameCount: usernames.length });
-
-    setImmediate(async () => {
-      try {
-        const results = await fetchGitlabContributionHistory(usernames);
-        const cache = readGitlabHistoryCache();
-        for (const [username, data] of Object.entries(results)) {
-          if (data) {
-            cache.users[username] = data;
-          }
-        }
-        cache.fetchedAt = new Date().toISOString();
-        writeToStorage(GITLAB_HISTORY_CACHE_PATH, cache);
-        console.log(`[gitlab] History refresh complete. ${Object.keys(results).length} users processed.`);
-      } catch (err) {
-        console.error('[gitlab] History refresh failed:', err.message);
-      }
-    });
-  } catch (error) {
-    console.error('GitLab history refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ─── Routes: Trends ───
-
-const { fetchContributionHistory } = require('./github/contributions');
-
-const GITHUB_HISTORY_CACHE_PATH = 'github-history.json';
-
-function readGithubHistoryCache() {
-  return readFromStorage(GITHUB_HISTORY_CACHE_PATH) || { users: {}, fetchedAt: null };
-}
 
 /**
  * Build Jira trends from cached person metrics files.
@@ -1281,98 +1315,6 @@ app.get('/api/trends', function(req, res) {
   }
 });
 
-app.post('/api/trends/jira/refresh', async function(req, res) {
-  try {
-    const roster = deriveRoster();
-    const seen = new Set();
-    const uniqueMembers = [];
-    for (const org of roster.orgs) {
-      for (const team of Object.values(org.teams)) {
-        for (const member of team.members) {
-          const name = member.jiraDisplayName || member.name;
-          if (!seen.has(name)) {
-            seen.add(name);
-            uniqueMembers.push(member);
-          }
-        }
-      }
-    }
-
-    res.json({ status: 'started', memberCount: uniqueMembers.length });
-
-    // Background: fetch 365-day metrics for each person
-    setImmediate(async () => {
-      console.log(`[trends] Starting Jira 365-day refresh for ${uniqueMembers.length} members...`);
-      let completed = 0;
-      let failed = 0;
-
-      for (const member of uniqueMembers) {
-        const name = member.jiraDisplayName || member.name;
-        try {
-          const metrics = await fetchPersonMetrics(jiraRequest, name, {
-            lookbackDays: 365,
-            nameCache: jiraNameCache
-          });
-          if (metrics._resolvedName) delete metrics._resolvedName;
-          const key = sanitizeFilename(name);
-          writeToStorage(`people/${key}.json`, metrics);
-          completed++;
-          if (completed % 25 === 0) {
-            console.log(`[trends] Jira refresh progress: ${completed}/${uniqueMembers.length}`);
-          }
-        } catch (error) {
-          failed++;
-          console.error(`[trends] Failed for ${name}:`, error.message);
-        }
-      }
-
-      persistNameCache();
-      console.log(`[trends] Jira refresh complete. ${completed} succeeded, ${failed} failed.`);
-    });
-  } catch (error) {
-    console.error('Trends Jira refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/trends/github/refresh', function(req, res) {
-  try {
-    const roster = deriveRoster();
-    const usernames = [];
-    for (const org of roster.orgs) {
-      for (const team of Object.values(org.teams)) {
-        for (const member of team.members) {
-          if (member.githubUsername && !usernames.includes(member.githubUsername)) {
-            usernames.push(member.githubUsername);
-          }
-        }
-      }
-    }
-
-    res.json({ status: 'started', usernameCount: usernames.length });
-
-    setImmediate(() => {
-      try {
-        const results = fetchContributionHistory(usernames);
-        const cache = readGithubHistoryCache();
-        for (const [username, data] of Object.entries(results)) {
-          if (data) {
-            cache.users[username] = data;
-          }
-        }
-        cache.fetchedAt = new Date().toISOString();
-        writeToStorage(GITHUB_HISTORY_CACHE_PATH, cache);
-        console.log(`[github] History refresh complete. ${Object.keys(results).length} users processed.`);
-      } catch (err) {
-        console.error('[github] History refresh failed:', err.message);
-      }
-    });
-  } catch (error) {
-    console.error('GitHub history refresh error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ─── Routes: Annotations ───
 
 app.get('/api/sprints/:sprintId/annotations', function(req, res) {
@@ -1415,7 +1357,7 @@ app.put('/api/sprints/:sprintId/annotations', function(req, res) {
   }
 });
 
-app.delete('/api/sprints/:sprintId/annotations/:assignee/:annotationId', function(req, res) {
+app.delete('/api/sprints/:sprintId/annotations/:assignee/:annotationId', requireAdmin, function(req, res) {
   try {
     const { sprintId, assignee, annotationId } = req.params;
     const data = readFromStorage(`annotations/${sprintId}.json`);
@@ -1444,7 +1386,7 @@ app.delete('/api/sprints/:sprintId/annotations/:assignee/:annotationId', functio
 
 // ─── Routes: Allowlist ───
 
-app.get('/api/allowlist', function(req, res) {
+app.get('/api/allowlist', requireAdmin, function(req, res) {
   try {
     const data = readFromStorage('allowlist.json') || { emails: [] };
     res.json({ emails: data.emails });
@@ -1454,7 +1396,7 @@ app.get('/api/allowlist', function(req, res) {
   }
 });
 
-app.post('/api/allowlist', function(req, res) {
+app.post('/api/allowlist', requireAdmin, function(req, res) {
   try {
     const { email } = req.body;
     if (!email || typeof email !== 'string') {
@@ -1480,7 +1422,7 @@ app.post('/api/allowlist', function(req, res) {
   }
 });
 
-app.delete('/api/allowlist/:email', function(req, res) {
+app.delete('/api/allowlist/:email', requireAdmin, function(req, res) {
   try {
     const email = decodeURIComponent(req.params.email).toLowerCase();
     const data = readFromStorage('allowlist.json') || { emails: [] };
@@ -1502,16 +1444,121 @@ app.delete('/api/allowlist/:email', function(req, res) {
   }
 });
 
+// ─── Routes: Roster Sync Admin ───
+
+app.get('/api/admin/roster-sync/config', requireAdmin, function(req, res) {
+  try {
+    const config = rosterSyncConfig.loadConfig(storageModule);
+    if (!config) {
+      return res.json({ configured: false });
+    }
+    res.json({ configured: true, ...config });
+  } catch (error) {
+    console.error('Read roster-sync config error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/roster-sync/config', requireAdmin, function(req, res) {
+  try {
+    const { orgRoots, googleSheetId, sheetNames, githubOrgs, gitlabGroups } = req.body;
+
+    if (!orgRoots || !Array.isArray(orgRoots) || orgRoots.length === 0) {
+      return res.status(400).json({ error: 'At least one org root is required' });
+    }
+
+    for (const root of orgRoots) {
+      if (!root.uid || !root.displayName) {
+        return res.status(400).json({ error: 'Each org root must have uid and displayName' });
+      }
+    }
+
+    // Preserve sync metadata from existing config
+    const existing = rosterSyncConfig.loadConfig(storageModule) || {};
+    const config = {
+      orgRoots,
+      googleSheetId: googleSheetId || null,
+      sheetNames: sheetNames || [],
+      githubOrgs: githubOrgs || [],
+      gitlabGroups: gitlabGroups || [],
+      lastSyncAt: existing.lastSyncAt || null,
+      lastSyncStatus: existing.lastSyncStatus || null,
+      lastSyncError: existing.lastSyncError || null
+    };
+
+    rosterSyncConfig.saveConfig(storageModule, config);
+
+    // Schedule daily sync if not already running
+    if (!DEMO_MODE) {
+      rosterSync.scheduleDaily(storageModule);
+    }
+
+    res.json({ configured: true, ...config });
+  } catch (error) {
+    console.error('Save roster-sync config error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/roster-sync/trigger', requireAdmin, function(req, res) {
+  try {
+    if (rosterSync.isSyncInProgress()) {
+      return res.json({ status: 'already_running' });
+    }
+
+    if (!rosterSyncConfig.isConfigured(storageModule)) {
+      return res.status(400).json({ error: 'Roster sync is not configured' });
+    }
+
+    // Start sync in background
+    rosterSync.runSync(storageModule).then(function(result) {
+      console.log('[roster-sync] On-demand sync result:', result.status);
+    }).catch(function(err) {
+      console.error('[roster-sync] On-demand sync error:', err);
+    });
+
+    res.json({ status: 'started' });
+  } catch (error) {
+    console.error('Trigger roster-sync error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/roster-sync/status', requireAdmin, function(req, res) {
+  try {
+    const config = rosterSyncConfig.loadConfig(storageModule);
+    res.json({
+      configured: rosterSyncConfig.isConfigured(storageModule),
+      syncing: rosterSync.isSyncInProgress(),
+      lastSyncAt: config ? config.lastSyncAt : null,
+      lastSyncStatus: config ? config.lastSyncStatus : null,
+      lastSyncError: config ? config.lastSyncError : null
+    });
+  } catch (error) {
+    console.error('Roster-sync status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // CORS preflight
 app.options('/api/{*path}', function(req, res) { res.status(200).end(); });
 
 // ─── Start ───
 
-seedAllowlist();
+seedAdminList();
+
+// Start daily roster sync if configured
+if (!DEMO_MODE && rosterSyncConfig.isConfigured(storageModule)) {
+  rosterSync.scheduleDaily(storageModule);
+  console.log('Roster sync: daily schedule active');
+} else if (!DEMO_MODE) {
+  console.log('Roster sync: not configured (visit Settings to set up)');
+}
 
 app.listen(PORT, function() {
   console.log(`\nTeam Tracker dev server running at http://localhost:${PORT}`);
   console.log(`Jira host: ${JIRA_HOST}`);
   console.log(`Local storage: ./data/`);
-  console.log(`JIRA_TOKEN: ${process.env.JIRA_TOKEN ? 'set' : 'NOT SET (refresh will fail)'}\n`);
+  console.log(`JIRA_TOKEN: ${process.env.JIRA_TOKEN ? 'set' : 'NOT SET (refresh will fail)'}`);
+  console.log(`JIRA_EMAIL: ${process.env.JIRA_EMAIL ? 'set' : 'NOT SET (refresh will fail)'}\n`);
 });

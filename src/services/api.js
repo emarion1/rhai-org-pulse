@@ -1,11 +1,11 @@
 /**
  * API Service
  * Handles communication with the backend
- * Automatically includes Firebase ID token in requests
  * Uses localStorage for stale-while-revalidate caching
+ *
+ * Authentication is handled by the OpenShift OAuth proxy —
+ * no client-side token management needed.
  */
-
-import { useAuth } from '../composables/useAuth'
 
 const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || '/api'
 const CACHE_PREFIX = 'tt_cache:'
@@ -36,10 +36,6 @@ function cacheSet(key, data) {
   }
 }
 
-function cacheDelete(key) {
-  localStorage.removeItem(CACHE_PREFIX + key)
-}
-
 function evictOldest() {
   const keys = []
   for (let i = 0; i < localStorage.length; i++) {
@@ -67,44 +63,8 @@ export function clearApiCache() {
   }
 }
 
-/**
- * Get Firebase ID token for authentication
- */
-async function getAuthToken() {
-  const { getIdToken, loading } = useAuth()
-
-  if (loading.value) {
-    await new Promise((resolve) => {
-      const checkLoading = setInterval(() => {
-        if (!loading.value) {
-          clearInterval(checkLoading)
-          resolve()
-        }
-      }, 50)
-      setTimeout(() => {
-        clearInterval(checkLoading)
-        resolve()
-      }, 10000)
-    })
-  }
-
-  try {
-    return await getIdToken()
-  } catch (error) {
-    console.error('Failed to get auth token:', error)
-    throw new Error('Authentication required. Please sign in again.', { cause: error })
-  }
-}
-
 async function apiRequest(path, options = {}) {
-  const token = await getAuthToken()
-  const response = await fetch(`${API_ENDPOINT}${path}`, {
-    ...options,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      ...options.headers
-    }
-  })
+  const response = await fetch(`${API_ENDPOINT}${path}`, options)
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
@@ -153,6 +113,12 @@ async function cachedRequest(cacheKey, path, onData) {
   }
 }
 
+// ─── Last Refreshed ───
+
+export async function getLastRefreshed() {
+  return apiRequest('/last-refreshed')
+}
+
 // ─── Roster & Person Metrics ───
 
 export async function getRoster(onData) {
@@ -163,33 +129,21 @@ export async function getAllPeopleMetrics(onData) {
   return cachedRequest('people-metrics', '/people/metrics', onData)
 }
 
-export async function getPersonMetrics(jiraDisplayName, { refresh = false } = {}) {
-  const params = refresh ? '?refresh=true' : ''
-  const cacheKey = `person:${jiraDisplayName}`
-  if (refresh) {
-    cacheDelete(cacheKey)
-    const data = await apiRequest(`/person/${encodeURIComponent(jiraDisplayName)}/metrics${params}`)
-    cacheSet(cacheKey, data)
-    return data
-  }
-  return cachedRequest(cacheKey, `/person/${encodeURIComponent(jiraDisplayName)}/metrics`)
+export async function getPersonMetrics(jiraDisplayName) {
+  return cachedRequest(`person:${jiraDisplayName}`, `/person/${encodeURIComponent(jiraDisplayName)}/metrics`)
 }
 
 export async function getTeamMetrics(teamKey, onData) {
   return cachedRequest(`team:${teamKey}`, `/team/${encodeURIComponent(teamKey)}/metrics`, onData)
 }
 
-export async function refreshAllMetrics({ force = false } = {}) {
-  return apiRequest(`/roster/refresh${force ? '?force=true' : ''}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
+// ─── Unified Refresh ───
 
-export async function refreshTeamMetrics(teamKey) {
-  return apiRequest(`/team/${encodeURIComponent(teamKey)}/refresh`, {
+export async function refreshMetrics({ scope, name, teamKey, orgKey, force, sources } = {}) {
+  return apiRequest('/refresh', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope, name, teamKey, orgKey, force, sources })
   })
 }
 
@@ -199,65 +153,16 @@ export async function getGithubContributions(onData) {
   return cachedRequest('github-contributions', '/github/contributions', onData)
 }
 
-export async function refreshGithubContribution(username) {
-  return apiRequest(`/github/contributions/${encodeURIComponent(username)}/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
-export async function refreshGithubContributions() {
-  return apiRequest('/github/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
 // ─── GitLab Contributions ───
 
 export async function getGitlabContributions(onData) {
   return cachedRequest('gitlab-contributions', '/gitlab/contributions', onData)
 }
 
-export async function refreshGitlabContribution(username) {
-  return apiRequest(`/gitlab/contributions/${encodeURIComponent(username)}/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
-export async function refreshGitlabContributions() {
-  return apiRequest('/gitlab/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
-export async function refreshTrendsGitlab() {
-  return apiRequest('/trends/gitlab/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
 // ─── Trends ───
 
 export async function getTrends(onData) {
   return cachedRequest('trends', '/trends', onData)
-}
-
-export async function refreshTrendsJira() {
-  return apiRequest('/trends/jira/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
-export async function refreshTrendsGithub() {
-  return apiRequest('/trends/github/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
 }
 
 // ─── Annotations ───
@@ -278,6 +183,31 @@ export async function deleteAnnotation(sprintId, assignee, annotationId) {
   return apiRequest(`/sprints/${encodeURIComponent(sprintId)}/annotations/${encodeURIComponent(assignee)}/${encodeURIComponent(annotationId)}`, {
     method: 'DELETE'
   })
+}
+
+// ─── Roster Sync Admin ───
+
+export async function getRosterSyncConfig() {
+  return apiRequest('/admin/roster-sync/config')
+}
+
+export async function saveRosterSyncConfig(data) {
+  return apiRequest('/admin/roster-sync/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+}
+
+export async function triggerRosterSync() {
+  return apiRequest('/admin/roster-sync/trigger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
+
+export async function getRosterSyncStatus() {
+  return apiRequest('/admin/roster-sync/status')
 }
 
 // ─── Allowlist ───

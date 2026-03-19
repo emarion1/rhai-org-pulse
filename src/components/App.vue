@@ -1,149 +1,153 @@
 <template>
-  <AuthGuard>
-    <div id="app" class="min-h-screen bg-gray-50">
-      <header class="bg-primary-700 text-white shadow-lg">
-        <div class="container mx-auto px-6 py-2 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <img src="/redhat-logo.svg" alt="Red Hat" class="h-8" />
-            <h1 class="text-xl font-bold cursor-pointer" @click="navigateToDashboard">AI Engineering Team Tracker</h1>
-          </div>
-          <div class="flex items-center gap-4">
-            <!-- Refresh All -->
-            <button
-              v-if="authUser"
-              @click="handleRefreshAll($event)"
-              :disabled="true"
-              title="Refreshes temporarily disabled — Jira is down"
-              class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-md font-medium hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 border border-primary-400"
-            >
-              <svg class="h-4 w-4" :class="{ 'animate-spin': isRefreshing }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {{ isRefreshing ? 'Refreshing...' : 'Refresh All' }}
-            </button>
-            <!-- User Avatar and Sign Out -->
-            <div class="relative" v-if="authUser">
-              <button
-                @click="showUserMenu = !showUserMenu"
-                class="flex items-center gap-2 hover:bg-primary-600 rounded-full p-1 transition-colors"
-              >
-                <div
-                  v-if="!authUser.photoURL || avatarLoadError"
-                  class="h-8 w-8 rounded-full border-2 border-white bg-white text-primary-700 flex items-center justify-center font-bold text-xs"
-                >
-                  {{ getUserInitials(authUser) }}
-                </div>
-                <img
-                  v-else
-                  :src="authUser.photoURL"
-                  :alt="authUser.displayName || authUser.email"
-                  class="h-8 w-8 rounded-full border-2 border-white"
-                  @error="avatarLoadError = true"
-                />
-              </button>
+  <div id="app" class="min-h-screen bg-gray-50">
+    <!-- Sidebar -->
+    <AppSidebar
+      :collapsed="sidebarCollapsed"
+      :mobile-open="mobileMenuOpen"
+      :active-module="activeModule"
+      :user="authUser"
+      :is-admin="authIsAdmin"
+      @navigate="navigateToModule"
+      @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+      @close-mobile="mobileMenuOpen = false"
+    />
 
-              <div
-                v-if="showUserMenu"
-                class="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-10"
-              >
-                <div class="px-4 py-2 border-b border-gray-200">
-                  <p class="text-sm font-medium text-gray-900">{{ authUser.displayName }}</p>
-                  <p class="text-xs text-gray-500 truncate">{{ authUser.email }}</p>
-                </div>
-                <button
-                  @click="handleSignOut"
-                  class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                >
-                  <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  Sign Out
-                </button>
-              </div>
+    <!-- Main content area -->
+    <div
+      class="min-h-screen transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
+      :class="sidebarCollapsed ? 'pl-[72px]' : 'pl-[260px]'"
+    >
+      <!-- Top bar -->
+      <header class="sticky top-0 z-10 bg-white/80 backdrop-blur-xl border-b border-gray-200/60">
+        <div class="flex items-center justify-between px-6 lg:px-8 h-16">
+          <div class="flex items-center gap-4">
+            <!-- Mobile menu button -->
+            <button
+              class="lg:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+              @click="mobileMenuOpen = !mobileMenuOpen"
+            >
+              <MenuIcon :size="20" />
+            </button>
+            <!-- Page title & sub-nav -->
+            <div>
+              <h2 class="text-lg font-semibold text-gray-900">{{ currentPageTitle }}</h2>
             </div>
           </div>
-        </div>
-        <nav class="bg-primary-800">
-          <div class="container mx-auto px-6 flex gap-1">
-            <button
-              v-for="tab in navTabs"
-              :key="tab.view"
-              @click="navigateToTab(tab.view)"
-              class="px-4 py-2 text-sm font-medium transition-colors border-b-2"
-              :class="isTabActive(tab.view)
-                ? 'text-white border-white'
-                : 'text-primary-200 border-transparent hover:text-white hover:border-primary-400'"
+          <div class="flex items-center gap-3">
+            <!-- Sub-navigation tabs (for dashboard drill-down views) -->
+            <nav
+              v-if="activeModule === 'dashboard' && hasSubViews"
+              class="hidden sm:flex items-center gap-1 bg-gray-100 rounded-lg p-1"
             >
-              {{ tab.label }}
+              <button
+                v-for="tab in subTabs"
+                :key="tab.view"
+                @click="navigateToSubView(tab.view)"
+                class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200"
+                :class="isSubViewActive(tab.view)
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'"
+              >{{ tab.label }}</button>
+            </nav>
+            <!-- Last updated + Refresh All -->
+            <span
+              v-if="lastRefreshedLabel"
+              class="hidden md:inline text-xs text-gray-400"
+            >{{ lastRefreshedLabel }}</span>
+            <button
+              v-if="authUser && authIsAdmin"
+              @click="showRefreshModal = true"
+              :disabled="isRefreshing"
+              title="Refresh all metrics"
+              class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-gray-900 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+            >
+              <RefreshCw :size="16" :class="{ 'animate-spin': isRefreshing }" />
+              <span class="hidden sm:inline">{{ isRefreshing ? 'Refreshing...' : 'Refresh' }}</span>
             </button>
           </div>
-        </nav>
+        </div>
       </header>
 
-      <!-- Dashboard View -->
-      <main v-if="currentView === 'dashboard'" class="relative">
-        <Dashboard
-          @select-team="handleSelectTeam"
-        />
-        <LoadingOverlay v-if="isLoading" />
-      </main>
+      <!-- Setup Banner -->
+      <SetupBanner
+        v-if="authUser && currentView === 'dashboard'"
+        @go-settings="navigateToModule('settings')"
+      />
 
-      <!-- Team Roster View -->
-      <main v-else-if="currentView === 'team-roster'">
+      <!-- Page content -->
+      <main class="px-6 lg:px-8 py-6">
+        <!-- Dashboard View -->
+        <template v-if="currentView === 'dashboard'">
+          <Dashboard
+            @select-team="handleSelectTeam"
+          />
+          <LoadingOverlay v-if="isLoading" />
+        </template>
+
+        <!-- Team Roster View -->
         <TeamRosterView
+          v-else-if="currentView === 'team-roster'"
           :team="selectedTeam"
           @select-person="handleSelectPerson"
           @back="navigateToDashboard"
         />
-      </main>
 
-      <!-- Person Detail View -->
-      <main v-else-if="currentView === 'person-detail'">
+        <!-- Person Detail View -->
         <PersonDetail
+          v-else-if="currentView === 'person-detail'"
           :person="selectedPerson"
           :teamName="selectedTeam?.displayName || ''"
           @back="handleBackFromPerson"
           @go-dashboard="navigateToDashboard"
         />
-      </main>
 
-      <!-- People View -->
-      <main v-else-if="currentView === 'people'">
-        <PeopleView />
-      </main>
+        <!-- People View -->
+        <PeopleView v-else-if="currentView === 'people'" />
 
-      <!-- Trends View -->
-      <main v-else-if="currentView === 'trends'">
-        <TrendsView />
-      </main>
+        <!-- Trends View -->
+        <TrendsView v-else-if="currentView === 'trends'" />
 
-      <!-- Reports View -->
-      <main v-else-if="currentView === 'reports'">
-        <ReportsView @back="navigateToDashboard" />
-      </main>
+        <!-- Reports View -->
+        <ReportsView
+          v-else-if="currentView === 'reports'"
+          @back="navigateToDashboard"
+        />
 
-      <!-- User Management View -->
-      <main v-else-if="currentView === 'user-management'">
+        <!-- User Management View -->
         <UserManagement
+          v-else-if="currentView === 'user-management'"
           @back="navigateToDashboard"
           @toast="({ message, type }) => showToast(message, type)"
         />
-      </main>
 
-      <Toast
-        v-for="toast in toasts"
-        :key="toast.id"
-        :message="toast.message"
-        :type="toast.type"
-        :duration="toast.duration"
-        @close="removeToast(toast.id)"
-      />
+        <!-- Settings View -->
+        <SettingsView
+          v-else-if="currentView === 'settings'"
+          @toast="({ message, type }) => showToast(message, type)"
+        />
+      </main>
     </div>
-  </AuthGuard>
+
+    <RefreshModal
+      v-if="showRefreshModal"
+      scopeLabel="Refresh data for all teams and members"
+      @confirm="handleRefreshAllConfirm"
+      @cancel="showRefreshModal = false"
+    />
+
+    <Toast
+      v-for="toast in toasts"
+      :key="toast.id"
+      :message="toast.message"
+      :type="toast.type"
+      :duration="toast.duration"
+      @close="removeToast(toast.id)"
+    />
+  </div>
 </template>
 
 <script>
-import AuthGuard from './AuthGuard.vue'
+import { Menu as MenuIcon, RefreshCw } from 'lucide-vue-next'
 import Dashboard from './Dashboard.vue'
 import LoadingOverlay from './LoadingOverlay.vue'
 import PersonDetail from './PersonDetail.vue'
@@ -153,15 +157,22 @@ import PeopleView from './PeopleView.vue'
 import ReportsView from './ReportsView.vue'
 import TrendsView from './TrendsView.vue'
 import UserManagement from './UserManagement.vue'
+import SettingsView from './SettingsView.vue'
+import SetupBanner from './SetupBanner.vue'
+import AppSidebar from './AppSidebar.vue'
+import RefreshModal from './RefreshModal.vue'
+import { computed, ref, onUnmounted } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useRoster } from '../composables/useRoster'
 import { useGithubStats } from '../composables/useGithubStats'
-import { refreshAllMetrics, refreshTrendsGithub } from '../services/api'
+import { useGitlabStats } from '../composables/useGitlabStats'
+import { refreshMetrics, getLastRefreshed } from '../services/api'
 
 export default {
   name: 'App',
   components: {
-    AuthGuard,
+    MenuIcon,
+    RefreshCw,
     Dashboard,
     LoadingOverlay,
     PeopleView,
@@ -170,18 +181,50 @@ export default {
     TrendsView,
     TeamRosterView,
     Toast,
-    UserManagement
+    UserManagement,
+    SettingsView,
+    SetupBanner,
+    AppSidebar,
+    RefreshModal
   },
   setup() {
-    const { user: authUser, signOut } = useAuth()
+    const { user: authUser, isAdmin: authIsAdmin } = useAuth()
     const { loadRoster, teams, selectedOrgKey, selectOrg, loading: rosterLoading } = useRoster()
-    const { loadGithubStats, refreshStats } = useGithubStats()
+    const { loadGithubStats } = useGithubStats()
+    const { loadGitlabStats } = useGitlabStats()
+    const lastRefreshedAt = ref(null)
+    const tick = ref(0)
+    const tickTimer = setInterval(() => { tick.value++ }, 30000)
+    onUnmounted(() => clearInterval(tickTimer))
+    const lastRefreshedLabel = computed(() => {
+      tick.value
+      if (!lastRefreshedAt.value) return null
+      const ts = new Date(lastRefreshedAt.value)
+      const now = new Date()
+      const diff = now - ts
+      const mins = Math.floor(diff / 60000)
+      if (mins < 1) return 'Updated just now'
+      if (mins === 1) return 'Updated 1 min ago'
+      if (mins < 60) return `Updated ${mins} mins ago`
+      const hours = Math.floor(mins / 60)
+      if (hours === 1) return 'Updated 1 hr ago'
+      if (hours < 24) return `Updated ${hours} hrs ago`
+      return `Updated ${ts.toLocaleDateString()}`
+    })
+    async function fetchLastRefreshed() {
+      try {
+        const { timestamp } = await getLastRefreshed()
+        lastRefreshedAt.value = timestamp
+      } catch { /* ignore */ }
+    }
     return {
       authUser,
-      signOut,
+      authIsAdmin,
+      lastRefreshedLabel,
+      fetchLastRefreshed,
       loadRoster,
       loadGithubStats,
-      refreshStats,
+      loadGitlabStats,
       rosterLoading,
       rosterTeams: teams,
       selectedOrgKey,
@@ -195,44 +238,75 @@ export default {
       selectedPerson: null,
       isLoading: false,
       isRefreshing: false,
-      showUserMenu: false,
-      avatarLoadError: false,
+      showRefreshModal: false,
+      sidebarCollapsed: false,
+      mobileMenuOpen: false,
       toasts: [],
-      navTabs: [
+      subTabs: [
         { view: 'dashboard', label: 'Teams' },
-        { view: 'people', label: 'People' },
-        { view: 'trends', label: 'Trends' },
-        { view: 'reports', label: 'Reports' },
-        { view: 'user-management', label: 'Users' }
+        { view: 'team-roster', label: 'Roster' },
+        { view: 'person-detail', label: 'Person' },
       ]
+    }
+  },
+  computed: {
+    activeModule() {
+      if (['dashboard', 'team-roster', 'person-detail'].includes(this.currentView)) {
+        return 'dashboard'
+      }
+      return this.currentView
+    },
+    currentPageTitle() {
+      const titles = {
+        'dashboard': 'Dashboard',
+        'team-roster': this.selectedTeam?.displayName || 'Team Roster',
+        'person-detail': this.selectedPerson?.name || 'Person Detail',
+        'people': 'People',
+        'trends': 'Trends',
+        'reports': 'Reports',
+        'user-management': 'Users',
+        'settings': 'Settings'
+      }
+      return titles[this.currentView] || 'Dashboard'
+    },
+    hasSubViews() {
+      return this.selectedTeam != null
     }
   },
   watch: {
     authUser(newUser, oldUser) {
-      this.avatarLoadError = false
       if (newUser && !oldUser) {
         this.loadInitialData()
       }
     }
   },
   mounted() {
-    document.addEventListener('click', this.handleClickOutside)
     window.addEventListener('hashchange', this.onHashChange)
+    window.addEventListener('keydown', this.onKeyDown)
     if (this.authUser) {
       this.loadInitialData()
     }
   },
   beforeUnmount() {
-    document.removeEventListener('click', this.handleClickOutside)
     window.removeEventListener('hashchange', this.onHashChange)
+    window.removeEventListener('keydown', this.onKeyDown)
   },
   methods: {
+    onKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault()
+        this.sidebarCollapsed = !this.sidebarCollapsed
+      }
+    },
+
     async loadInitialData() {
       this.isLoading = true
       try {
         await Promise.all([
           this.loadRoster(),
-          this.loadGithubStats()
+          this.loadGithubStats(),
+          this.loadGitlabStats(),
+          this.fetchLastRefreshed()
         ])
         this.restoreFromHash()
       } catch (error) {
@@ -256,6 +330,8 @@ export default {
         hash = '#/reports'
       } else if (this.currentView === 'user-management') {
         hash = '#/users'
+      } else if (this.currentView === 'settings') {
+        hash = '#/settings'
       }
       if (window.location.hash !== hash) {
         window.location.hash = hash
@@ -268,7 +344,6 @@ export default {
 
       if (parts[0] === 'team' && parts[1]) {
         const teamKey = parts[1]
-        // Select the right org
         const orgKey = teamKey.split('::')[0]
         if (orgKey && this.selectedOrgKey !== orgKey) {
           this.selectOrg(orgKey)
@@ -301,6 +376,9 @@ export default {
       } else if (parts[0] === 'users') {
         this.currentView = 'user-management'
         return
+      } else if (parts[0] === 'settings') {
+        this.currentView = 'settings'
+        return
       }
 
       this.currentView = 'dashboard'
@@ -319,7 +397,19 @@ export default {
       this.updateHash()
     },
 
-    navigateToTab(view) {
+    navigateToModule(moduleId) {
+      this.mobileMenuOpen = false
+      if (moduleId === 'dashboard') {
+        this.navigateToDashboard()
+      } else {
+        this.currentView = moduleId
+        this.selectedTeam = null
+        this.selectedPerson = null
+        this.updateHash()
+      }
+    },
+
+    navigateToSubView(view) {
       if (view === 'dashboard') {
         this.navigateToDashboard()
       } else {
@@ -328,10 +418,7 @@ export default {
       }
     },
 
-    isTabActive(tabView) {
-      if (tabView === 'dashboard') {
-        return ['dashboard', 'team-roster', 'person-detail'].includes(this.currentView)
-      }
+    isSubViewActive(tabView) {
       return this.currentView === tabView
     },
 
@@ -354,21 +441,12 @@ export default {
       this.updateHash()
     },
 
-    async handleRefreshAll(event) {
-      const force = event?.shiftKey || false
+    async handleRefreshAllConfirm({ force, sources }) {
+      this.showRefreshModal = false
       this.isRefreshing = true
       try {
-        // Jira refresh is the primary action; GitHub refreshes are best-effort
-        const results = await Promise.allSettled([
-          refreshAllMetrics({ force }),
-          this.refreshStats(),
-          refreshTrendsGithub()
-        ])
-        const failed = results.filter(r => r.status === 'rejected')
-        if (failed.length === results.length) {
-          throw failed[0].reason
-        }
-        this.showToast(force ? 'Hard refresh started — ignoring cache' : 'Refresh started — data will update shortly')
+        await refreshMetrics({ scope: 'all', force, sources })
+        this.showToast('Refresh started — data will update shortly')
       } catch (err) {
         console.error('Failed to start refresh:', err)
         this.showToast('Failed to start refresh', 'error')
@@ -379,17 +457,6 @@ export default {
       }
     },
 
-    async handleSignOut() {
-      this.showUserMenu = false
-      await this.signOut()
-    },
-
-    handleClickOutside(event) {
-      if (!event.target.closest('.relative')) {
-        this.showUserMenu = false
-      }
-    },
-
     showToast(message, type = 'success', duration = 3000) {
       const id = Date.now()
       this.toasts.push({ id, message, type, duration })
@@ -397,21 +464,6 @@ export default {
 
     removeToast(id) {
       this.toasts = this.toasts.filter(t => t.id !== id)
-    },
-
-    getUserInitials(user) {
-      if (!user) return '?'
-      if (user.displayName) {
-        const parts = user.displayName.split(' ')
-        if (parts.length >= 2) {
-          return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-        }
-        return user.displayName.substring(0, 2).toUpperCase()
-      }
-      if (user.email) {
-        return user.email.substring(0, 2).toUpperCase()
-      }
-      return '??'
     }
   }
 }

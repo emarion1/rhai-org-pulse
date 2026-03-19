@@ -1,5 +1,5 @@
 <template>
-  <div class="container mx-auto px-6 py-6">
+  <div>
     <!-- Breadcrumb -->
     <nav class="flex items-center gap-2 text-sm text-gray-500 mb-4">
       <button @click="$emit('go-dashboard')" class="hover:text-primary-600 transition-colors">Dashboard</button>
@@ -60,9 +60,8 @@
           </div>
         </div>
         <button
-          @click="loadMetrics(true)"
-          :disabled="true"
-          title="Refreshes temporarily disabled — Jira is down"
+          @click="showRefreshModal = true"
+          :disabled="isLoading"
           class="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-md font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
         >
           <svg class="h-4 w-4" :class="{ 'animate-spin': isLoading }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -72,6 +71,13 @@
         </button>
       </div>
     </div>
+
+    <RefreshModal
+      v-if="showRefreshModal"
+      :scopeLabel="`Refresh data for ${person.name}`"
+      @confirm="handleRefreshConfirm"
+      @cancel="showRefreshModal = false"
+    />
 
     <!-- Stale data warning -->
     <div v-if="metrics?.stale" class="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6 flex items-start gap-3">
@@ -164,7 +170,7 @@
               <tr v-for="issue in metrics.resolved.issues" :key="issue.key" class="hover:bg-gray-50">
                 <td class="px-4 py-2 text-sm">
                   <a
-                    :href="`https://issues.redhat.com/browse/${issue.key}`"
+                    :href="`https://redhat.atlassian.net/browse/${issue.key}`"
                     target="_blank"
                     class="text-primary-600 hover:underline"
                   >
@@ -206,7 +212,7 @@
               <tr v-for="issue in metrics.inProgress.issues" :key="issue.key" class="hover:bg-gray-50">
                 <td class="px-4 py-2 text-sm">
                   <a
-                    :href="`https://issues.redhat.com/browse/${issue.key}`"
+                    :href="`https://redhat.atlassian.net/browse/${issue.key}`"
                     target="_blank"
                     class="text-primary-600 hover:underline"
                   >
@@ -230,10 +236,11 @@
 import { ref, computed, onMounted } from 'vue'
 import SpecialtyBadge from './SpecialtyBadge.vue'
 import MetricCard from './MetricCard.vue'
+import RefreshModal from './RefreshModal.vue'
 import { useRoster } from '../composables/useRoster'
 import { useGithubStats } from '../composables/useGithubStats'
 import { useGitlabStats } from '../composables/useGitlabStats'
-import { getPersonMetrics } from '../services/api'
+import { getPersonMetrics, refreshMetrics } from '../services/api'
 
 const props = defineProps({
   person: { type: Object, required: true },
@@ -242,8 +249,8 @@ const props = defineProps({
 defineEmits(['back', 'go-dashboard'])
 
 const { getTeamsForPerson } = useRoster()
-const { getContributions: getGithubContributions, refreshUserStats: refreshGithubUserStats } = useGithubStats()
-const { getContributions: getGitlabContributionsFn, loadGitlabStats } = useGitlabStats()
+const { getContributions: getGithubContributions, setUserContributions: setGithubUserData } = useGithubStats()
+const { getContributions: getGitlabContributionsFn, loadGitlabStats, setUserContributions: setGitlabUserData } = useGitlabStats()
 
 const githubContributions = computed(() => getGithubContributions(props.person.githubUsername))
 const githubProfileUrl = props.person.githubUsername
@@ -258,19 +265,36 @@ const gitlabProfileUrl = props.person.gitlabUsername
 const metrics = ref(null)
 const isLoading = ref(false)
 const error = ref(null)
+const showRefreshModal = ref(false)
 
 const personTeams = getTeamsForPerson(props.person.jiraDisplayName)
 
-async function loadMetrics(refresh = false) {
+async function handleRefreshConfirm({ force, sources }) {
+  showRefreshModal.value = false
+  await loadMetrics({ refresh: true, force, sources })
+}
+
+async function loadMetrics({ refresh = false, force, sources } = {}) {
   isLoading.value = true
   error.value = null
   try {
-    const promises = [getPersonMetrics(props.person.jiraDisplayName, { refresh })]
-    if (refresh && props.person.githubUsername) {
-      promises.push(refreshGithubUserStats(props.person.githubUsername))
+    if (refresh) {
+      const result = await refreshMetrics({
+        scope: 'person',
+        name: props.person.jiraDisplayName,
+        force,
+        sources
+      })
+      metrics.value = result.jira
+      if (result.github && props.person.githubUsername) {
+        setGithubUserData(props.person.githubUsername, result.github)
+      }
+      if (result.gitlab && props.person.gitlabUsername) {
+        setGitlabUserData(props.person.gitlabUsername, result.gitlab)
+      }
+    } else {
+      metrics.value = await getPersonMetrics(props.person.jiraDisplayName)
     }
-    const [jiraMetrics] = await Promise.all(promises)
-    metrics.value = jiraMetrics
   } catch (err) {
     error.value = err.message
     console.error('Failed to load person metrics:', err)
