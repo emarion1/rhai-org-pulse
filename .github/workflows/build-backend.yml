@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: quay.io/accorvin/team-tracker-backend
+  IMAGE: quay.io/org-pulse/team-tracker-backend
 
 jobs:
   test:
