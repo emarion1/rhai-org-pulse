@@ -1,0 +1,105 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: team-tracker-sync-refresh
+  labels:
+    app: team-tracker
+    component: sync-refresh
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: team-tracker
+            component: sync-refresh
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sync-refresh
+              image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  BACKEND="http://backend:3001"
+                  AUTH_HEADER="X-Forwarded-Email: acorvin@redhat.com"
+
+                  # Step 1: Trigger roster sync
+                  echo "=== Triggering roster sync ==="
+                  RESP=$(curl -sf -X POST "$BACKEND/api/admin/roster-sync/trigger" \
+                    -H "$AUTH_HEADER" -H "Content-Type: application/json")
+                  echo "Response: $RESP"
+
+                  STATUS=$(echo "$RESP" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+                  if [ "$STATUS" != "started" ] && [ "$STATUS" != "already_running" ]; then
+                    echo "ERROR: Unexpected roster sync response"
+                    exit 1
+                  fi
+
+                  # Poll roster sync status until complete
+                  echo "=== Waiting for roster sync to complete ==="
+                  ATTEMPTS=0
+                  MAX_ATTEMPTS=60
+                  while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+                    sleep 15
+                    ATTEMPTS=$((ATTEMPTS + 1))
+                    SYNC_STATUS=$(curl -sf "$BACKEND/api/admin/roster-sync/status" -H "$AUTH_HEADER")
+                    SYNCING=$(echo "$SYNC_STATUS" | grep -o '"syncing":true' || true)
+                    if [ -z "$SYNCING" ]; then
+                      echo "Roster sync complete after $ATTEMPTS checks"
+                      SYNC_ERR=$(echo "$SYNC_STATUS" | grep -o '"lastSyncStatus":"[^"]*"' | cut -d'"' -f4)
+                      echo "Last sync status: $SYNC_ERR"
+                      break
+                    fi
+                    echo "Still syncing... (attempt $ATTEMPTS/$MAX_ATTEMPTS)"
+                  done
+
+                  if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
+                    echo "ERROR: Roster sync timed out"
+                    exit 1
+                  fi
+
+                  # Step 2: Trigger full metrics refresh
+                  echo "=== Triggering full metrics refresh ==="
+                  RESP=$(curl -sf -X POST "$BACKEND/api/refresh" \
+                    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+                    -d '{"scope":"all","force":true}')
+                  echo "Response: $RESP"
+
+                  # Poll refresh status until complete
+                  echo "=== Waiting for metrics refresh to complete ==="
+                  ATTEMPTS=0
+                  MAX_ATTEMPTS=120
+                  while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+                    sleep 15
+                    ATTEMPTS=$((ATTEMPTS + 1))
+                    REFRESH_STATUS=$(curl -sf "$BACKEND/api/refresh/status" -H "$AUTH_HEADER")
+                    RUNNING=$(echo "$REFRESH_STATUS" | grep -o '"running":true' || true)
+                    if [ -z "$RUNNING" ]; then
+                      echo "Metrics refresh complete after $ATTEMPTS checks"
+                      break
+                    fi
+                    echo "Still refreshing... (attempt $ATTEMPTS/$MAX_ATTEMPTS)"
+                  done
+
+                  if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
+                    echo "ERROR: Metrics refresh timed out"
+                    exit 1
+                  fi
+
+                  echo "=== Sync and refresh completed successfully ==="
+              resources:
+                requests:
+                  memory: "32Mi"
+                  cpu: "10m"
+                limits:
+                  memory: "64Mi"
+                  cpu: "50m"

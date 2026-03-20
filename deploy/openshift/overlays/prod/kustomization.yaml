@@ -5,6 +5,7 @@ namespace: ambient-code--team-tracker
 
 resources:
   - ../../base
+  - cronjob-sync-refresh.yaml
 
 patches:
   - path: route-patch.yaml
