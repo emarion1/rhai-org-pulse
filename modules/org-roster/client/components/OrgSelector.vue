@@ -19,7 +19,6 @@
         : 'bg-white text-gray-700 border-gray-300 hover:border-primary-300 hover:bg-primary-50'"
     >
       {{ org.name }}
-      <span class="ml-1 text-xs opacity-75">({{ org.teamCount }})</span>
     </button>
   </div>
 </template>
