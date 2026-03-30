@@ -50,9 +50,14 @@ function getInvolvementClass(involvement) {
           {{ rfe.creatorDisplayName }} &bull; {{ new Date(rfe.created).toLocaleDateString() }}
         </p>
       </div>
-      <span class="inline-flex items-center px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-xs capitalize shrink-0 dark:text-gray-300">
-        {{ rfe.priority }}
-      </span>
+      <div class="flex items-center gap-2 shrink-0">
+        <span class="inline-flex items-center px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-xs capitalize dark:text-gray-300">
+          {{ rfe.priority }}
+        </span>
+        <svg class="h-4 w-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
     </div>
   </div>
 </template>
