@@ -1,4 +1,5 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import RFEListItem from './RFEListItem.vue'
 
 defineProps({
@@ -10,6 +11,23 @@ defineProps({
 })
 
 const emit = defineEmits(['update:filter', 'update:searchQuery', 'selectRFE'])
+
+const HINT_KEY = 'ai-impact:rfe-hint-dismissed'
+const showHint = ref(false)
+
+onMounted(() => {
+  showHint.value = !localStorage.getItem(HINT_KEY)
+})
+
+function dismissHint() {
+  showHint.value = false
+  localStorage.setItem(HINT_KEY, '1')
+}
+
+function handleSelectRFE(rfe) {
+  dismissHint()
+  emit('selectRFE', rfe)
+}
 </script>
 
 <template>
@@ -50,6 +68,24 @@ const emit = defineEmits(['update:filter', 'update:searchQuery', 'selectRFE'])
       </div>
     </div>
 
+    <div
+      v-if="showHint"
+      class="mb-3 flex items-center justify-between gap-2 rounded-md bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 px-3 py-2 text-sm text-primary-700 dark:text-primary-300"
+    >
+      <div class="flex items-center gap-2">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>Click any RFE to view its full delivery lifecycle</span>
+      </div>
+      <button @click="dismissHint" class="p-0.5 hover:bg-primary-100 dark:hover:bg-primary-800 rounded">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
     <div v-if="rfes.length === 0" class="py-8 text-center text-gray-500 dark:text-gray-400">
       No RFEs match your filters
     </div>
@@ -60,7 +96,7 @@ const emit = defineEmits(['update:filter', 'update:searchQuery', 'selectRFE'])
         :key="rfe.key"
         :rfe="rfe"
         :selected="selectedRFE?.key === rfe.key"
-        @select="emit('selectRFE', $event)"
+        @select="handleSelectRFE"
       />
     </div>
   </div>
