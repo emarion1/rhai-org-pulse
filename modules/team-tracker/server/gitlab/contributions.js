@@ -181,7 +181,20 @@ async function fetchGroupWindowContributions(groupPath, from, to, credentials) {
 async function fetchInstanceContributions(instance, credentials, usernameSet, windows) {
   const userMonths = {};
 
-  for (const group of instance.groups) {
+  // Filter out excluded groups for this instance
+  const excludeGroups = instance.excludeGroups || [];
+  const filteredGroups = instance.groups.filter(g => !excludeGroups.includes(g));
+
+  if (excludeGroups.length > 0) {
+    console.log(`[gitlab] ${instance.label}: Excluding ${excludeGroups.length} group(s): ${excludeGroups.join(', ')}`);
+  }
+
+  if (filteredGroups.length === 0) {
+    console.warn(`[gitlab] ${instance.label}: All groups excluded, skipping`);
+    return { counts: {}, instanceInfo: { baseUrl: instance.baseUrl, label: instance.label } };
+  }
+
+  for (const group of filteredGroups) {
     for (const window of windows) {
       try {
         const counts = await fetchGroupWindowContributions(group, window.from, window.to, credentials);

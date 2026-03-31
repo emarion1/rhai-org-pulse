@@ -212,6 +212,37 @@
                   Add group
                 </button>
               </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Exclude Groups</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Skip specific groups (e.g., mirrors)</p>
+                <div class="space-y-2 mb-2">
+                  <div v-for="(group, eIdx) in instance.excludeGroups" :key="'gle-' + iIdx + '-' + eIdx" class="flex items-center gap-2">
+                    <input
+                      v-model="instance.excludeGroups[eIdx]"
+                      placeholder="e.g. redhat/rhel-ai/core/mirrors"
+                      class="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    />
+                    <button
+                      @click="instance.excludeGroups.splice(eIdx, 1)"
+                      class="p-1 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                      title="Remove excluded group"
+                    >
+                      <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <button
+                  @click="instance.excludeGroups.push('')"
+                  class="text-sm text-primary-600 hover:text-primary-700 dark:hover:text-primary-400 font-medium flex items-center gap-1"
+                >
+                  <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add excluded group
+                </button>
+              </div>
             </div>
           </div>
           <button
@@ -277,7 +308,8 @@ function populateForm() {
       label: i.label || '',
       baseUrl: i.baseUrl || '',
       tokenEnvVar: i.tokenEnvVar || '',
-      groups: [...(i.groups || [])]
+      groups: [...(i.groups || [])],
+      excludeGroups: [...(i.excludeGroups || [])]
     }))
   } else {
     editRoots.value = [{ uid: '', displayName: '' }]
@@ -287,7 +319,7 @@ function populateForm() {
 }
 
 function addGitlabInstance() {
-  editGitlabInstances.value.push({ label: '', baseUrl: '', tokenEnvVar: '', groups: [] })
+  editGitlabInstances.value.push({ label: '', baseUrl: '', tokenEnvVar: '', groups: [], excludeGroups: [] })
 }
 
 watch(config, populateForm)
@@ -333,7 +365,8 @@ async function handleSave() {
         label: i.label.trim(),
         baseUrl: i.baseUrl.trim(),
         tokenEnvVar: i.tokenEnvVar.trim(),
-        groups: i.groups.map(g => g.trim()).filter(Boolean)
+        groups: i.groups.map(g => g.trim()).filter(Boolean),
+        excludeGroups: (i.excludeGroups || []).map(g => g.trim()).filter(Boolean)
       }))
 
     await saveConfig({

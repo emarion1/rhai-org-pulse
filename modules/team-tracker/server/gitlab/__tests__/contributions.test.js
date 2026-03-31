@@ -457,6 +457,36 @@ describe('fetchGitlabData integration', () => {
     }
   })
 
+  it('should skip excluded groups within an instance', async () => {
+    const refs = setup()
+    try {
+      const queriedGroups = []
+      mockFetch.mockImplementation(async (url, opts) => {
+        const body = JSON.parse(opts.body)
+        queriedGroups.push(body.variables.groupPath)
+        return makeGraphQLResponse([
+          { user: { username: 'testuser' }, totalEvents: 10 }
+        ])
+      })
+
+      await fetchGitlabData(['testuser'], {
+        gitlabInstances: [
+          makeInstance({
+            groups: ['group-a', 'group-b', 'group-c'],
+            excludeGroups: ['group-b']
+          })
+        ]
+      })
+
+      // Verify group-b was not queried
+      expect(queriedGroups).not.toContain('group-b')
+      expect(queriedGroups).toContain('group-a')
+      expect(queriedGroups).toContain('group-c')
+    } finally {
+      cleanup(refs)
+    }
+  })
+
   it('merges contributions across multiple instances', async () => {
     const refs = setup()
     try {
@@ -493,6 +523,41 @@ describe('fetchGitlabData integration', () => {
       expect(inst2.contributions).toBe(60)
     } finally {
       delete process.env.GITLAB_TOKEN_2
+      cleanup(refs)
+    }
+  })
+
+  it('should aggregate only from non-excluded groups', async () => {
+    const refs = setup()
+    try {
+      mockFetch.mockImplementation(async (url, opts) => {
+        const body = JSON.parse(opts.body)
+        if (body.variables.groupPath === 'group-a') {
+          return makeGraphQLResponse([
+            { user: { username: 'testuser' }, totalEvents: 10 }
+          ])
+        }
+        if (body.variables.groupPath === 'group-c') {
+          return makeGraphQLResponse([
+            { user: { username: 'testuser' }, totalEvents: 20 }
+          ])
+        }
+        // group-b should not be called
+        return makeGraphQLResponse([])
+      })
+
+      const results = await fetchGitlabData(['testuser'], {
+        gitlabInstances: [
+          makeInstance({
+            groups: ['group-a', 'group-b', 'group-c'],
+            excludeGroups: ['group-b']
+          })
+        ]
+      })
+
+      // 10 + 20 = 30 per month (group-b excluded), 12 months = 360
+      expect(results.testuser.totalContributions).toBe(360)
+    } finally {
       cleanup(refs)
     }
   })

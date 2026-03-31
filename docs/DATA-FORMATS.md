@@ -166,7 +166,8 @@ Stores the configuration for automated roster building. Managed via the Settings
       "label": "GitLab.com",
       "baseUrl": "https://gitlab.com",
       "tokenEnvVar": "GITLAB_TOKEN",
-      "groups": ["my-group"]
+      "groups": ["my-group"],
+      "excludeGroups": ["redhat/rhel-ai/core/mirrors"]
     }
   ],
   "teamStructure": {
@@ -191,7 +192,7 @@ Stores the configuration for automated roster building. Managed via the Settings
 **Notes:**
 - `orgRoots` is required (at least one). Each entry needs `uid` and `displayName`.
 - `googleSheetId`, `sheetNames`, `githubOrgs`, `gitlabGroups`, `gitlabInstances` are optional (default to `null` or `[]`).
-- `gitlabInstances` is the preferred way to configure GitLab instances. Legacy `gitlabGroups` is auto-migrated to `gitlabInstances` on first load. Each instance has `label`, `baseUrl` (must start with `https://`), `tokenEnvVar` (name of env var holding the token), and `groups` (array of group paths).
+- `gitlabInstances` is the preferred way to configure GitLab instances. Legacy `gitlabGroups` is auto-migrated to `gitlabInstances` on first load. Each instance has `label`, `baseUrl` (must start with `https://`), `tokenEnvVar` (name of env var holding the token), `groups` (array of group paths), and optional `excludeGroups` (array of group paths to skip when fetching contributions, e.g., mirror repositories).
 - `teamStructure` replaces legacy `fieldMapping`/`customFields` via an in-memory migration on load.
 - `customFields` supports up to 20 entries. At most one can have `primaryDisplay: true`.
 - `lastSyncAt`, `lastSyncStatus`, `lastSyncError` are auto-populated during sync runs.
