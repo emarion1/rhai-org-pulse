@@ -228,7 +228,8 @@ import {
   ChevronsRight,
   HelpCircle,
   ChartCandlestick,
-  Sparkles
+  Sparkles,
+  Activity
 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
@@ -244,9 +245,11 @@ const ICON_MAP = {
   Network,
   Layers,
   Sparkles,
+  Activity,
   'bar-chart': BarChart3,
   'chart-candlestick': ChartCandlestick,
-  sparkles: Sparkles,
+  'sparkles': Sparkles,
+  'activity': Activity,
   'network': Network
 }
 
