@@ -26,6 +26,9 @@ npm run dev:full       # Starts Vite (5173) + Express (3001)
 | `GITLAB_TOKEN` | GitLab PAT with `read_api` scope (for contribution stats). Without it, only public project contributions are counted. |
 | `GITLAB_BASE_URL` | GitLab instance URL (default: `https://gitlab.com`) |
 | `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` | Path to Google SA JSON key (default: `/etc/secrets/google-sa-key.json`). For local dev: `./secrets/google-sa-key.json` |
+| `PRODUCT_PAGES_CLIENT_ID` | OAuth client ID for Product Pages (production). Mutually exclusive with `PRODUCT_PAGES_TOKEN`. |
+| `PRODUCT_PAGES_CLIENT_SECRET` | OAuth client secret for Product Pages (production). Used with `PRODUCT_PAGES_CLIENT_ID`. |
+| `PRODUCT_PAGES_TOKEN` | Personal bearer token for Product Pages (local dev fallback). Used when OAuth env vars are not set. |
 | `DEMO_MODE` / `VITE_DEMO_MODE` | Set both to `true` to run with fixture data (no credentials needed) |
 
 ### Commands
@@ -265,6 +268,7 @@ In production, all routes are authenticated via OpenShift OAuth proxy. The proxy
 - `/api/allowlist` — authorized email list
 - `/api/admin/roster-sync/config` — roster sync configuration
 - `/api/admin/roster-sync/status` — sync status (running/last result)
+- `/api/modules/release-analysis/product-pages/products` — Product Pages product list for autocomplete (admin, includes authStatus)
 
 **POST:**
 - `/api/roster/refresh` — refresh all person metrics from Jira

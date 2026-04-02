@@ -7,6 +7,9 @@ const DEFAULT_CONFIG = {
   riskIssuesPerDayGreen: 1,
   riskIssuesPerDayYellow: 10,
   productPagesReleasesUrl: '',
+  productPagesProductShortnames: [],
+  productPagesBaseUrl: 'https://productpages.redhat.com',
+  productPagesTokenUrl: 'https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/openid-connect/token',
   jiraAllProjects: false,
   targetVersionField: 'customfield_10855',
   targetVersionJqlFragment: ''
@@ -46,6 +49,15 @@ function applyEnvOverrides(config) {
   }
   if (env.PRODUCT_PAGES_RELEASES_URL) {
     config.productPagesReleasesUrl = env.PRODUCT_PAGES_RELEASES_URL;
+  }
+  if (env.PRODUCT_PAGES_PRODUCT_SHORTNAMES) {
+    config.productPagesProductShortnames = env.PRODUCT_PAGES_PRODUCT_SHORTNAMES.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  if (env.PRODUCT_PAGES_BASE_URL) {
+    config.productPagesBaseUrl = env.PRODUCT_PAGES_BASE_URL;
+  }
+  if (env.PRODUCT_PAGES_TOKEN_URL) {
+    config.productPagesTokenUrl = env.PRODUCT_PAGES_TOKEN_URL;
   }
   if (env.RELEASE_ANALYSIS_JIRA_ALL_PROJECTS) {
     config.jiraAllProjects = ['1', 'true', 'yes'].includes(
@@ -178,6 +190,48 @@ function saveConfig(writeToStorage, config) {
       throw new Error('productPagesReleasesUrl must be an HTTP or HTTPS URL');
     }
     merged.productPagesReleasesUrl = url;
+  }
+
+  // productPagesProductShortnames — array of shortname strings (empty allowed)
+  if (config.productPagesProductShortnames !== undefined) {
+    let items = config.productPagesProductShortnames;
+    if (typeof items === 'string') {
+      items = items.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (!Array.isArray(items)) {
+      throw new Error('productPagesProductShortnames must be an array');
+    }
+    const SHORTNAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+    for (const s of items) {
+      if (typeof s !== 'string' || !SHORTNAME_PATTERN.test(s)) {
+        throw new Error(`Invalid product shortname "${s}": must match ${SHORTNAME_PATTERN}`);
+      }
+    }
+    merged.productPagesProductShortnames = items;
+  }
+
+  // productPagesBaseUrl — empty or valid HTTP(S) URL
+  if (config.productPagesBaseUrl !== undefined) {
+    if (typeof config.productPagesBaseUrl !== 'string') {
+      throw new Error('productPagesBaseUrl must be a string');
+    }
+    const url = config.productPagesBaseUrl.trim();
+    if (url && !/^https?:\/\//i.test(url)) {
+      throw new Error('productPagesBaseUrl must be an HTTP or HTTPS URL');
+    }
+    merged.productPagesBaseUrl = url;
+  }
+
+  // productPagesTokenUrl — empty or valid HTTP(S) URL
+  if (config.productPagesTokenUrl !== undefined) {
+    if (typeof config.productPagesTokenUrl !== 'string') {
+      throw new Error('productPagesTokenUrl must be a string');
+    }
+    const url = config.productPagesTokenUrl.trim();
+    if (url && !/^https?:\/\//i.test(url)) {
+      throw new Error('productPagesTokenUrl must be an HTTP or HTTPS URL');
+    }
+    merged.productPagesTokenUrl = url;
   }
 
   // jiraAllProjects — boolean

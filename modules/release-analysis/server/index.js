@@ -1,5 +1,6 @@
 const { jiraRequest, JIRA_HOST, fetchAllJqlResults } = require('../../../shared/server/jira')
 const { getConfig, saveConfig, deleteConfig } = require('./config')
+const { fetchProductsByShortname, fetchAllProducts, getProductPagesToken, getAuthStatus } = require('./product-pages')
 
 const DEMO_MODE = process.env.DEMO_MODE === 'true'
 
@@ -235,10 +236,29 @@ function safeDaysBetween(fromDate, toDate) {
 }
 
 async function fetchOpenReleases(storage, config) {
-  const PRODUCT_PAGES_TOKEN = process.env.PRODUCT_PAGES_TOKEN || ''
+  // New path: product shortnames configured
+  if (config.productPagesProductShortnames?.length) {
+    try {
+      const releases = await fetchProductsByShortname(config.productPagesProductShortnames, config)
+      if (releases.length > 0) {
+        storage.writeToStorage('release-analysis/product-pages-releases-cache.json', {
+          source: 'api',
+          fetchedAt: new Date().toISOString(),
+          releases
+        })
+        return releases
+      }
+    } catch (err) {
+      console.error('[release-analysis] Product Pages fetch by shortname failed:', err.message)
+    }
+    // Fall through to cache on failure or empty result
+  }
+
+  // Legacy path: raw URL (preserved for backward compatibility)
   if (config.productPagesReleasesUrl) {
+    const token = await getProductPagesToken(config)
     const headers = { Accept: 'application/json' }
-    if (PRODUCT_PAGES_TOKEN) headers.Authorization = `Bearer ${PRODUCT_PAGES_TOKEN}`
+    if (token) headers.Authorization = `Bearer ${token}`
     const response = await fetch(config.productPagesReleasesUrl, {
       headers,
       signal: AbortSignal.timeout(30000)
@@ -752,6 +772,20 @@ module.exports = function registerRoutes(router, context) {
     deleteConfig(writeToStorage)
     const config = getConfig(readFromStorage)
     res.json({ config, source: 'env' })
+  })
+
+  // --- Product Pages routes ---
+
+  router.get('/product-pages/products', requireAdmin, async function(req, res) {
+    try {
+      const config = getConfig(readFromStorage)
+      const authStatus = getAuthStatus()
+      const products = await fetchAllProducts(config)
+      res.json({ products, authStatus })
+    } catch (err) {
+      console.error('[release-analysis] product-pages/products error:', err)
+      res.status(500).json({ error: err.message })
+    }
   })
 
   // --- Refresh routes ---

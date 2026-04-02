@@ -13,6 +13,69 @@ const refreshStatus = ref(null)
 const refreshTriggering = ref(false)
 const resetting = ref(false)
 
+// Product Pages product selector state
+const productSearchQuery = ref('')
+const availableProducts = ref([])
+const loadingProducts = ref(false)
+const authStatus = ref('none')
+const showLegacyUrl = ref(false)
+const showProductDropdown = ref(false)
+
+const filteredProducts = ref([])
+
+function updateFilteredProducts() {
+  const q = productSearchQuery.value.toLowerCase()
+  if (!q) {
+    filteredProducts.value = availableProducts.value.slice(0, 20)
+    return
+  }
+  filteredProducts.value = availableProducts.value
+    .filter(p => p.shortname.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))
+    .slice(0, 20)
+}
+
+function addProduct(product) {
+  if (!config.value.productPagesProductShortnames) {
+    config.value.productPagesProductShortnames = []
+  }
+  if (!config.value.productPagesProductShortnames.includes(product.shortname)) {
+    config.value.productPagesProductShortnames.push(product.shortname)
+  }
+  productSearchQuery.value = ''
+  showProductDropdown.value = false
+}
+
+function addManualShortname() {
+  const val = productSearchQuery.value.trim()
+  if (!val) return
+  if (!config.value.productPagesProductShortnames) {
+    config.value.productPagesProductShortnames = []
+  }
+  if (!config.value.productPagesProductShortnames.includes(val)) {
+    config.value.productPagesProductShortnames.push(val)
+  }
+  productSearchQuery.value = ''
+  showProductDropdown.value = false
+}
+
+function removeProduct(shortname) {
+  if (!config.value.productPagesProductShortnames) return
+  config.value.productPagesProductShortnames = config.value.productPagesProductShortnames.filter(s => s !== shortname)
+}
+
+async function loadProducts() {
+  loadingProducts.value = true
+  try {
+    const result = await apiRequest('/modules/release-analysis/product-pages/products')
+    availableProducts.value = result.products || []
+    authStatus.value = result.authStatus || 'none'
+  } catch {
+    availableProducts.value = []
+  } finally {
+    loadingProducts.value = false
+  }
+}
+
 async function loadConfig() {
   loading.value = true
   try {
@@ -20,6 +83,9 @@ async function loadConfig() {
     config.value = result.config
     editProjectKeys.value = [...(result.config.projectKeys || [])]
     envSource.value = result.source === 'env'
+    if (!config.value.productPagesProductShortnames) {
+      config.value.productPagesProductShortnames = []
+    }
   } catch {
     config.value = null
   } finally {
@@ -107,6 +173,7 @@ async function checkRefreshStatus() {
 onMounted(() => {
   loadConfig()
   checkRefreshStatus()
+  loadProducts()
 })
 </script>
 
@@ -261,19 +328,123 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Section 3: Product Pages -->
+      <!-- Section 3: Product Pages Integration -->
       <div>
-        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Product Pages</h4>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Releases URL</label>
-          <input
-            v-model="config.productPagesReleasesUrl"
-            type="text"
-            placeholder="https://..."
-            class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500"
-          />
+        <div class="flex items-center gap-3 mb-3">
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Product Pages Integration</h4>
+          <span
+            v-if="authStatus === 'oauth'"
+            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+          >OAuth configured</span>
+          <span
+            v-else-if="authStatus === 'token'"
+            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300"
+          >Personal token</span>
+          <span
+            v-else
+            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+          >No auth</span>
         </div>
-        <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">Product Pages token is configured via environment variable (PRODUCT_PAGES_TOKEN)</p>
+
+        <!-- Product shortname selector -->
+        <div class="mb-3">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Shortnames</label>
+          <div v-if="config.productPagesProductShortnames?.length" class="flex flex-wrap gap-2 mb-2">
+            <span
+              v-for="shortname in config.productPagesProductShortnames"
+              :key="shortname"
+              class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-sm bg-primary-100 text-primary-800 dark:bg-primary-900/40 dark:text-primary-300"
+            >
+              {{ shortname }}
+              <button @click="removeProduct(shortname)" class="hover:text-red-600 dark:hover:text-red-400">
+                <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </span>
+          </div>
+          <div class="relative">
+            <input
+              v-model="productSearchQuery"
+              @input="updateFilteredProducts"
+              @focus="showProductDropdown = true; updateFilteredProducts()"
+              @blur="setTimeout(() => { showProductDropdown = false }, 150)"
+              @keydown.enter.prevent="addManualShortname"
+              type="text"
+              placeholder="Search or type a product shortname..."
+              class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500"
+            />
+            <div
+              v-if="showProductDropdown && (filteredProducts.length || productSearchQuery)"
+              class="absolute z-10 mt-1 w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-48 overflow-y-auto"
+            >
+              <button
+                v-for="product in filteredProducts"
+                :key="product.shortname"
+                @mousedown.prevent="addProduct(product)"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
+              >
+                <span class="font-medium">{{ product.shortname }}</span>
+                <span class="text-gray-500 dark:text-gray-400"> &mdash; {{ product.name }}</span>
+              </button>
+              <button
+                v-if="productSearchQuery && !filteredProducts.some(p => p.shortname === productSearchQuery.trim())"
+                @mousedown.prevent="addManualShortname"
+                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 text-primary-600 dark:text-primary-400 border-t border-gray-200 dark:border-gray-700"
+              >
+                Add "{{ productSearchQuery.trim() }}" manually
+              </button>
+              <div v-if="!filteredProducts.length && !productSearchQuery" class="px-3 py-2 text-sm text-gray-400">
+                {{ loadingProducts ? 'Loading products...' : 'No products available' }}
+              </div>
+            </div>
+          </div>
+          <p v-if="authStatus === 'none'" class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            Configure Product Pages credentials to browse available products. You can still type shortnames manually.
+          </p>
+          <p v-else class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            Authentication is configured via environment variables (PRODUCT_PAGES_CLIENT_ID/SECRET or PRODUCT_PAGES_TOKEN).
+          </p>
+        </div>
+
+        <!-- Advanced / Legacy collapsible -->
+        <div class="mt-3">
+          <button
+            @click="showLegacyUrl = !showLegacyUrl"
+            class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
+          >
+            <svg class="h-4 w-4 transition-transform" :class="{ 'rotate-90': showLegacyUrl }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+            Advanced / Legacy
+          </button>
+          <div v-if="showLegacyUrl" class="mt-2 space-y-3 pl-5 border-l-2 border-gray-200 dark:border-gray-700">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Releases URL (Legacy)</label>
+              <input
+                v-model="config.productPagesReleasesUrl"
+                type="text"
+                placeholder="https://..."
+                class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500"
+              />
+              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Use this only if you need a custom Product Pages URL. When product shortnames are configured above, this field is ignored.</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Pages Base URL</label>
+              <input
+                v-model="config.productPagesBaseUrl"
+                type="text"
+                placeholder="https://productpages.redhat.com"
+                class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">SSO Token URL</label>
+              <input
+                v-model="config.productPagesTokenUrl"
+                type="text"
+                placeholder="https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/openid-connect/token"
+                class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500"
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Save / Reset buttons -->

@@ -295,6 +295,35 @@ Admin-configurable settings for the AI Impact module.
 - `trendThresholdPp` is the percentage-point threshold for classifying trends as "growing" or "declining" (0-50)
 - Defaults are used when no config file exists
 
+## Release Analysis — Config (`data/release-analysis/config.json`)
+
+Admin-configurable settings for the Release Analysis module.
+
+```json
+{
+  "projectKeys": ["RHOAIENG"],
+  "storyPointsField": "customfield_10028",
+  "featureWeightField": "",
+  "baselineDays": 180,
+  "baselineMode": "p90",
+  "riskIssuesPerDayGreen": 1,
+  "riskIssuesPerDayYellow": 10,
+  "productPagesReleasesUrl": "",
+  "productPagesProductShortnames": ["rhoai", "rhelai"],
+  "productPagesBaseUrl": "https://productpages.redhat.com",
+  "productPagesTokenUrl": "https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/openid-connect/token",
+  "jiraAllProjects": false,
+  "targetVersionField": "customfield_10855",
+  "targetVersionJqlFragment": ""
+}
+```
+
+**Notes:**
+- `productPagesProductShortnames` is an array of Product Pages product shortnames to track. When non-empty, overrides `productPagesReleasesUrl`.
+- `productPagesBaseUrl` defaults to `https://productpages.redhat.com`. Override for non-standard instances.
+- `productPagesTokenUrl` defaults to the Red Hat SSO token endpoint. Override for non-standard SSO.
+- Credentials (`PRODUCT_PAGES_CLIENT_ID`, `PRODUCT_PAGES_CLIENT_SECRET`, `PRODUCT_PAGES_TOKEN`) are env-var-only and not stored in config.
+
 ---
 
 ## Fixture Rules
