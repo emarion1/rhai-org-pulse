@@ -1,8 +1,5 @@
 name: Build & Push Images
 
-permissions:
-  pull-requests: write
-
 on:
   workflow_dispatch:
   push:
@@ -266,5 +263,4 @@ jobs:
             --title "deploy: update ${PARTS} image to ${GITHUB_SHA::7}" \
             --body "Automated image tag update for ${PARTS} to \`${{ github.sha }}\`." \
             --label automated
-          GH_TOKEN=${{ secrets.GITHUB_TOKEN }} gh pr review "$BRANCH" --approve
           gh pr merge "$BRANCH" --auto --squash
