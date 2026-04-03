@@ -34,7 +34,7 @@ module.exports = function registerRoutes(router, context) {
       return res.json({
         fetchedAt: null,
         jiraHost: JIRA_HOST,
-        metrics: { createdPct: 0, assessedPct: 0, createdChange: 0, assessedChange: 0, trend: 'stable', windowTotal: 0, totalRFEs: 0 },
+        metrics: { createdPct: 0, revisedPct: 0, createdChange: 0, revisedChange: 0, trend: 'stable', windowTotal: 0, totalRFEs: 0 },
         trendData: [],
         breakdown: [],
         issues: []
@@ -66,6 +66,11 @@ module.exports = function registerRoutes(router, context) {
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  router.delete('/cache', requireAdmin, function(req, res) {
+    writeToStorage('ai-impact/rfe-data.json', null);
+    res.json({ status: 'cleared' });
   });
 
   router.get('/refresh/status', function(req, res) {

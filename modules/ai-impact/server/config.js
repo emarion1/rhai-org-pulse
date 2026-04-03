@@ -1,8 +1,8 @@
 const DEFAULT_CONFIG = {
   jiraProject: 'RHAIRFE',
   linkedProject: 'RHAISTRAT',
-  createdLabelPrefix: 'rfe-creator-',
-  assessedLabelPrefix: 'rfe-assess-',
+  createdLabel: 'rfe-creator-auto-created',
+  revisedLabel: 'rfe-creator-auto-revised',
   testExclusionLabel: 'rfe-creator-skill-testing',
   linkTypeName: 'Cloners',
   excludedStatuses: ['Closed'],
@@ -44,8 +44,8 @@ function saveConfig(writeToStorage, config) {
   }
 
   // String fields — validate type and JQL safety
-  const stringFields = ['jiraProject', 'linkedProject', 'createdLabelPrefix',
-    'assessedLabelPrefix', 'testExclusionLabel', 'linkTypeName'];
+  const stringFields = ['jiraProject', 'linkedProject', 'createdLabel',
+    'revisedLabel', 'testExclusionLabel', 'linkTypeName'];
   for (const key of stringFields) {
     if (config[key] !== undefined) {
       validateJqlSafeString(config[key], key);

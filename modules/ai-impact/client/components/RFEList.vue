@@ -62,7 +62,7 @@ function handleSelectRFE(rfe) {
           <option value="all">All</option>
           <option value="both">Both AI</option>
           <option value="created">Created</option>
-          <option value="assessed">Assessed</option>
+          <option value="revised">Revised</option>
           <option value="none">No AI</option>
         </select>
       </div>

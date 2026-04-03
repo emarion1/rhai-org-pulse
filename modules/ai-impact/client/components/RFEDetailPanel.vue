@@ -11,9 +11,9 @@ const emit = defineEmits(['close'])
 
 function getInvolvementLabel(involvement) {
   switch (involvement) {
-    case 'both': return 'Created & Assessed'
+    case 'both': return 'Created & Revised'
     case 'created': return 'AI Created'
-    case 'assessed': return 'AI Assessed'
+    case 'revised': return 'AI Revised'
     default: return 'No AI'
   }
 }
@@ -22,7 +22,7 @@ function getInvolvementClass(involvement) {
   switch (involvement) {
     case 'both': return 'bg-blue-500 text-white'
     case 'created': return 'bg-green-500 text-white'
-    case 'assessed': return 'bg-amber-500 text-white'
+    case 'revised': return 'bg-amber-500 text-white'
     default: return 'bg-gray-200 text-gray-600'
   }
 }

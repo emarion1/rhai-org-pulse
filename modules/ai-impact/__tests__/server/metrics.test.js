@@ -27,8 +27,8 @@ describe('computeMetrics', () => {
 
     // Current: 3 issues, 2 with created (created + both) = 67%
     expect(result.createdPct).toBe(67);
-    // Current: 3 issues, 1 with assessed (both) = 33%
-    expect(result.assessedPct).toBe(33);
+    // Current: 3 issues, 1 with revised (both) = 33%
+    expect(result.revisedPct).toBe(33);
     expect(result.windowTotal).toBe(3);
     expect(result.totalRFEs).toBe(5);
   });
@@ -36,7 +36,7 @@ describe('computeMetrics', () => {
   it('computes "week" time window', () => {
     const issues = [
       makeIssue(2, 'created'),
-      makeIssue(3, 'assessed'),
+      makeIssue(3, 'revised'),
       makeIssue(5, 'none'),
     ];
 
@@ -44,14 +44,14 @@ describe('computeMetrics', () => {
 
     expect(result.windowTotal).toBe(3);
     expect(result.createdPct).toBe(33);
-    expect(result.assessedPct).toBe(33);
+    expect(result.revisedPct).toBe(33);
   });
 
   it('computes "3months" time window', () => {
     const issues = [
       makeIssue(10, 'both'),
       makeIssue(30, 'created'),
-      makeIssue(60, 'assessed'),
+      makeIssue(60, 'revised'),
       makeIssue(85, 'none'),
     ];
 
@@ -119,7 +119,7 @@ describe('computeMetrics', () => {
     const result = computeMetrics([], 'month', { trendThresholdPp: 2 });
 
     expect(result.createdPct).toBe(0);
-    expect(result.assessedPct).toBe(0);
+    expect(result.revisedPct).toBe(0);
     expect(result.windowTotal).toBe(0);
     expect(result.totalRFEs).toBe(0);
     expect(result.trend).toBe('stable');
@@ -134,7 +134,7 @@ describe('computeMetrics', () => {
     const result = computeMetrics(issues, 'month', { trendThresholdPp: 2 });
 
     expect(result.createdPct).toBe(100);
-    expect(result.assessedPct).toBe(100);
+    expect(result.revisedPct).toBe(100);
   });
 
   it('uses default threshold of 2 when config is null', () => {
@@ -187,7 +187,7 @@ describe('buildTrendData', () => {
     const points = buildTrendData([], 'week');
     for (const p of points) {
       expect(p.createdPct).toBe(0);
-      expect(p.assessedPct).toBe(0);
+      expect(p.revisedPct).toBe(0);
       expect(p.total).toBe(0);
     }
   });
@@ -199,7 +199,7 @@ describe('buildBreakdownData', () => {
       makeIssue(1, 'both'),
       makeIssue(2, 'both'),
       makeIssue(3, 'created'),
-      makeIssue(4, 'assessed'),
+      makeIssue(4, 'revised'),
       makeIssue(5, 'none'),
       makeIssue(6, 'none'),
       makeIssue(7, 'none'),
@@ -208,9 +208,9 @@ describe('buildBreakdownData', () => {
     const result = buildBreakdownData(issues);
 
     expect(result).toEqual([
-      { name: 'Created & Assessed', value: 2 },
+      { name: 'Created & Revised', value: 2 },
       { name: 'AI Created', value: 1 },
-      { name: 'AI Assessed', value: 1 },
+      { name: 'AI Revised', value: 1 },
       { name: 'No AI', value: 3 },
     ]);
   });
@@ -218,9 +218,9 @@ describe('buildBreakdownData', () => {
   it('handles empty issues', () => {
     const result = buildBreakdownData([]);
     expect(result).toEqual([
-      { name: 'Created & Assessed', value: 0 },
+      { name: 'Created & Revised', value: 0 },
       { name: 'AI Created', value: 0 },
-      { name: 'AI Assessed', value: 0 },
+      { name: 'AI Revised', value: 0 },
       { name: 'No AI', value: 0 },
     ]);
   });

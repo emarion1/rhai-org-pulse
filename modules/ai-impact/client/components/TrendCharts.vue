@@ -39,8 +39,8 @@ const adoptionChartData = computed(() => ({
       tension: 0.3
     },
     {
-      label: 'Assessed with AI (%)',
-      data: props.trendData.map(p => p.assessedPct),
+      label: 'Revised with AI (%)',
+      data: props.trendData.map(p => p.revisedPct),
       borderColor: '#10b981',
       backgroundColor: 'rgba(16, 185, 129, 0.1)',
       fill: true,
@@ -111,7 +111,7 @@ const breakdownChartOptions = {
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div class="absolute right-0 top-6 z-10 hidden group-hover:block w-64 p-2 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg dark:shadow-gray-900/50">
-              Shows the percentage of RFEs created or assessed with AI assistance per week over the selected time window.
+              Shows the percentage of RFEs created or revised with AI assistance per week over the selected time window.
             </div>
           </div>
         </div>
@@ -129,7 +129,7 @@ const breakdownChartOptions = {
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div class="absolute right-0 top-6 z-10 hidden group-hover:block w-64 p-2 text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg dark:shadow-gray-900/50">
-              Counts of RFEs by AI involvement: created with AI, assessed with AI, both, or no AI involvement.
+              Counts of RFEs by AI involvement: created with AI, revised with AI, both, or no AI involvement.
             </div>
           </div>
         </div>

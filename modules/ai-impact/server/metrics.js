@@ -36,28 +36,28 @@ function computeMetrics(issues, timeWindow, config) {
 
   const currentCreated = currentIssues.filter(i =>
     i.aiInvolvement === 'created' || i.aiInvolvement === 'both').length;
-  const currentAssessed = currentIssues.filter(i =>
-    i.aiInvolvement === 'assessed' || i.aiInvolvement === 'both').length;
+  const currentRevised = currentIssues.filter(i =>
+    i.aiInvolvement === 'revised' || i.aiInvolvement === 'both').length;
   const currentTotal = currentIssues.length;
 
   const priorCreated = priorIssues.filter(i =>
     i.aiInvolvement === 'created' || i.aiInvolvement === 'both').length;
-  const priorAssessed = priorIssues.filter(i =>
-    i.aiInvolvement === 'assessed' || i.aiInvolvement === 'both').length;
+  const priorRevised = priorIssues.filter(i =>
+    i.aiInvolvement === 'revised' || i.aiInvolvement === 'both').length;
   const priorTotal = priorIssues.length;
 
   const createdPct = currentTotal > 0 ? Math.round((currentCreated / currentTotal) * 100) : 0;
-  const assessedPct = currentTotal > 0 ? Math.round((currentAssessed / currentTotal) * 100) : 0;
+  const revisedPct = currentTotal > 0 ? Math.round((currentRevised / currentTotal) * 100) : 0;
   const priorCreatedPct = priorTotal > 0 ? Math.round((priorCreated / priorTotal) * 100) : 0;
-  const priorAssessedPct = priorTotal > 0 ? Math.round((priorAssessed / priorTotal) * 100) : 0;
+  const priorRevisedPct = priorTotal > 0 ? Math.round((priorRevised / priorTotal) * 100) : 0;
 
   const createdChange = createdPct - priorCreatedPct;
-  const assessedChange = assessedPct - priorAssessedPct;
+  const revisedChange = revisedPct - priorRevisedPct;
   const trend = createdChange > threshold ? 'growing' : createdChange < -threshold ? 'declining' : 'stable';
-  const assessedTrend = assessedChange > threshold ? 'growing' : assessedChange < -threshold ? 'declining' : 'stable';
+  const revisedTrend = revisedChange > threshold ? 'growing' : revisedChange < -threshold ? 'declining' : 'stable';
 
   return {
-    createdPct, assessedPct, createdChange, assessedChange, trend, assessedTrend,
+    createdPct, revisedPct, createdChange, revisedChange, trend, revisedTrend,
     windowTotal: currentTotal,
     totalRFEs: issues.length
   };
@@ -79,13 +79,13 @@ function buildTrendData(issues, timeWindow) {
     const total = weekIssues.length;
     const createdWithAI = weekIssues.filter(i =>
       i.aiInvolvement === 'created' || i.aiInvolvement === 'both').length;
-    const assessedWithAI = weekIssues.filter(i =>
-      i.aiInvolvement === 'assessed' || i.aiInvolvement === 'both').length;
+    const revisedWithAI = weekIssues.filter(i =>
+      i.aiInvolvement === 'revised' || i.aiInvolvement === 'both').length;
 
     points.push({
       date: weekEnd.toISOString().slice(0, 10),
       createdPct: total > 0 ? Math.round((createdWithAI / total) * 100) : 0,
-      assessedPct: total > 0 ? Math.round((assessedWithAI / total) * 100) : 0,
+      revisedPct: total > 0 ? Math.round((revisedWithAI / total) * 100) : 0,
       total
     });
   }
@@ -95,9 +95,9 @@ function buildTrendData(issues, timeWindow) {
 
 function buildBreakdownData(issues) {
   return [
-    { name: 'Created & Assessed', value: issues.filter(i => i.aiInvolvement === 'both').length },
+    { name: 'Created & Revised', value: issues.filter(i => i.aiInvolvement === 'both').length },
     { name: 'AI Created', value: issues.filter(i => i.aiInvolvement === 'created').length },
-    { name: 'AI Assessed', value: issues.filter(i => i.aiInvolvement === 'assessed').length },
+    { name: 'AI Revised', value: issues.filter(i => i.aiInvolvement === 'revised').length },
     { name: 'No AI', value: issues.filter(i => i.aiInvolvement === 'none').length },
   ];
 }

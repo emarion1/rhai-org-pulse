@@ -3,14 +3,14 @@ const { classifyAIInvolvement } = require('./label-parser');
 
 function processIssue(issue, config) {
   const {
-    createdLabelPrefix,
-    assessedLabelPrefix,
+    createdLabel,
+    revisedLabel,
     testExclusionLabel
   } = config;
 
   const labels = issue.fields.labels || [];
   const aiInvolvement = classifyAIInvolvement(
-    labels, createdLabelPrefix, assessedLabelPrefix, testExclusionLabel
+    labels, createdLabel, revisedLabel, testExclusionLabel
   );
 
   return {

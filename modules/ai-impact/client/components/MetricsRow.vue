@@ -48,28 +48,28 @@ function formatChange(change) {
         </div>
       </div>
 
-      <!-- Assessed with AI -->
+      <!-- Revised with AI -->
       <div class="space-y-1">
         <p class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
           <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
           </svg>
-          Assessed with AI
+          Revised with AI
         </p>
         <div class="flex items-baseline gap-2">
-          <span class="text-3xl font-bold dark:text-gray-100">{{ metrics.assessedPct }}%</span>
-          <span class="text-sm flex items-center gap-1" :class="getTrendClass(metrics.assessedTrend)">
-            <svg v-if="metrics.assessedTrend === 'growing'" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <span class="text-3xl font-bold dark:text-gray-100">{{ metrics.revisedPct }}%</span>
+          <span class="text-sm flex items-center gap-1" :class="getTrendClass(metrics.revisedTrend)">
+            <svg v-if="metrics.revisedTrend === 'growing'" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
             </svg>
-            <svg v-else-if="metrics.assessedTrend === 'declining'" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg v-else-if="metrics.revisedTrend === 'declining'" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
             </svg>
             <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
             </svg>
-            {{ formatChange(metrics.assessedChange) }}
+            {{ formatChange(metrics.revisedChange) }}
           </span>
         </div>
       </div>

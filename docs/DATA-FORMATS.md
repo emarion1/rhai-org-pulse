@@ -253,7 +253,7 @@ Cached RFE issues fetched from Jira. The module's primary data file.
       "created": "2026-03-25T10:00:00Z",
       "creator": "schen",
       "creatorDisplayName": "Sarah Chen",
-      "labels": ["rfe-creator-v2", "rfe-assess-v1", "customer-request"],
+      "labels": ["rfe-creator-auto-created", "rfe-creator-auto-revised", "customer-request"],
       "aiInvolvement": "both",
       "linkedFeature": {
         "key": "RHAISTRAT-567",
@@ -267,7 +267,7 @@ Cached RFE issues fetched from Jira. The module's primary data file.
 ```
 
 **Notes:**
-- `aiInvolvement` is one of: `"both"`, `"created"`, `"assessed"`, `"none"` — derived from label prefixes at fetch time
+- `aiInvolvement` is one of: `"both"`, `"created"`, `"revised"`, `"none"` — derived from exact label matching at fetch time
 - `linkedFeature` is resolved from Jira issue links (type = "Cloners", outward to RHAISTRAT project). Can be `null` if no link exists.
 - `labels` is the raw Jira label array, preserved for reference
 
@@ -279,8 +279,8 @@ Admin-configurable settings for the AI Impact module.
 {
   "jiraProject": "RHAIRFE",
   "linkedProject": "RHAISTRAT",
-  "createdLabelPrefix": "rfe-creator-",
-  "assessedLabelPrefix": "rfe-assess-",
+  "createdLabel": "rfe-creator-auto-created",
+  "revisedLabel": "rfe-creator-auto-revised",
   "testExclusionLabel": "rfe-creator-skill-testing",
   "linkTypeName": "Cloners",
   "excludedStatuses": ["Closed"],

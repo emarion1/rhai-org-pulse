@@ -9,6 +9,8 @@ const saveError = ref(null)
 const saveSuccess = ref(false)
 const refreshStatus = ref(null)
 const refreshTriggering = ref(false)
+const clearingCache = ref(false)
+const clearCacheResult = ref(null)
 
 async function loadConfig() {
   loading.value = true
@@ -79,6 +81,20 @@ async function pollRefreshStatus() {
   setTimeout(poll, 2000)
 }
 
+async function clearCache() {
+  clearingCache.value = true
+  clearCacheResult.value = null
+  try {
+    await apiRequest('/modules/ai-impact/cache', { method: 'DELETE' })
+    clearCacheResult.value = { status: 'success', message: 'Cached data cleared' }
+    setTimeout(() => { clearCacheResult.value = null }, 3000)
+  } catch (e) {
+    clearCacheResult.value = { status: 'error', message: e.message }
+  } finally {
+    clearingCache.value = false
+  }
+}
+
 async function checkRefreshStatus() {
   try {
     refreshStatus.value = await apiRequest('/modules/ai-impact/refresh/status')
@@ -127,18 +143,18 @@ function getExcludedStatusesDisplay() {
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Created Label Prefix</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Created Label</label>
           <input
-            v-model="config.createdLabelPrefix"
+            v-model="config.createdLabel"
             type="text"
             class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300"
           />
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Assessed Label Prefix</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Revised Label</label>
           <input
-            v-model="config.assessedLabelPrefix"
+            v-model="config.revisedLabel"
             type="text"
             class="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300"
           />
@@ -222,6 +238,16 @@ function getExcludedStatusesDisplay() {
         >
           {{ refreshStatus?.running ? 'Refreshing...' : 'Refresh Now' }}
         </button>
+        <button
+          @click="clearCache"
+          :disabled="clearingCache"
+          class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+        >
+          {{ clearingCache ? 'Clearing...' : 'Clear Cached Data' }}
+        </button>
+        <span v-if="clearCacheResult" class="text-sm" :class="clearCacheResult.status === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+          {{ clearCacheResult.message }}
+        </span>
         <div v-if="refreshStatus?.lastResult" class="text-sm text-gray-500 dark:text-gray-400">
           Last refresh:
           <span :class="refreshStatus.lastResult.status === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">

@@ -4,8 +4,8 @@ import { processIssue } from '../../server/jira/rfe-fetcher.js';
 const DEFAULT_CONFIG = {
   jiraProject: 'RHAIRFE',
   linkedProject: 'RHAISTRAT',
-  createdLabelPrefix: 'rfe-creator-',
-  assessedLabelPrefix: 'rfe-assess-',
+  createdLabel: 'rfe-creator-auto-created',
+  revisedLabel: 'rfe-creator-auto-revised',
   testExclusionLabel: 'rfe-creator-skill-testing',
   linkTypeName: 'Cloners',
   excludedStatuses: ['Closed'],
@@ -31,7 +31,7 @@ function makeIssue(overrides = {}) {
 
 describe('processIssue', () => {
   it('processes an issue correctly', () => {
-    const issue = makeIssue({ labels: ['rfe-creator-v2'] });
+    const issue = makeIssue({ labels: ['rfe-creator-auto-created'] });
     const result = processIssue(issue, DEFAULT_CONFIG);
     expect(result.key).toBe('RHAIRFE-1');
     expect(result.summary).toBe('Test RFE');
@@ -50,15 +50,15 @@ describe('processIssue', () => {
   });
 
   it('classifies AI involvement as both', () => {
-    const issue = makeIssue({ labels: ['rfe-creator-v2', 'rfe-assess-v1'] });
+    const issue = makeIssue({ labels: ['rfe-creator-auto-created', 'rfe-creator-auto-revised'] });
     const result = processIssue(issue, DEFAULT_CONFIG);
     expect(result.aiInvolvement).toBe('both');
   });
 
-  it('classifies AI involvement as assessed', () => {
-    const issue = makeIssue({ labels: ['rfe-assess-v1'] });
+  it('classifies AI involvement as revised', () => {
+    const issue = makeIssue({ labels: ['rfe-creator-auto-revised'] });
     const result = processIssue(issue, DEFAULT_CONFIG);
-    expect(result.aiInvolvement).toBe('assessed');
+    expect(result.aiInvolvement).toBe('revised');
   });
 
   it('classifies AI involvement as none', () => {
@@ -88,9 +88,9 @@ describe('processIssue', () => {
   });
 
   it('extracts all labels', () => {
-    const issue = makeIssue({ labels: ['rfe-creator-v2', 'customer-request'] });
+    const issue = makeIssue({ labels: ['rfe-creator-auto-created', 'customer-request'] });
     const result = processIssue(issue, DEFAULT_CONFIG);
-    expect(result.labels).toEqual(['rfe-creator-v2', 'customer-request']);
+    expect(result.labels).toEqual(['rfe-creator-auto-created', 'customer-request']);
   });
 });
 

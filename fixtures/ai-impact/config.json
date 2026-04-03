@@ -1,8 +1,8 @@
 {
   "jiraProject": "RHAIRFE",
   "linkedProject": "RHAISTRAT",
-  "createdLabelPrefix": "rfe-creator-",
-  "assessedLabelPrefix": "rfe-assess-",
+  "createdLabel": "rfe-creator-auto-created",
+  "revisedLabel": "rfe-creator-auto-revised",
   "testExclusionLabel": "rfe-creator-skill-testing",
   "linkTypeName": "Cloners",
   "excludedStatuses": ["Closed"],

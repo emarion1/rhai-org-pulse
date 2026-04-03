@@ -12,7 +12,7 @@ function getPhaseSignal(phaseId, rfe) {
         completed: true,
         aiUsed: rfe.aiInvolvement !== 'none',
         detail: rfe.aiInvolvement !== 'none'
-          ? `AI ${rfe.aiInvolvement === 'both' ? 'created & assessed' : rfe.aiInvolvement}`
+          ? `AI ${rfe.aiInvolvement === 'both' ? 'created & revised' : rfe.aiInvolvement}`
           : 'No AI involvement'
       }
     case 'architecture':

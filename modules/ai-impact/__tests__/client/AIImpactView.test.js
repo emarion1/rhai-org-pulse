@@ -66,9 +66,9 @@ describe('MetricsRow', () => {
   it('renders metrics when data is loaded', () => {
     const metrics = {
       createdPct: 77,
-      assessedPct: 69,
+      revisedPct: 69,
       createdChange: 5,
-      assessedChange: 3,
+      revisedChange: 3,
       trend: 'growing',
       windowTotal: 20,
       totalRFEs: 62
