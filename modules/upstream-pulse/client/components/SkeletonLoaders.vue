@@ -1,7 +1,3 @@
-<template>
-  <!-- This component is not rendered directly — use named exports via script -->
-</template>
-
 <script>
 import { h } from 'vue'
 
