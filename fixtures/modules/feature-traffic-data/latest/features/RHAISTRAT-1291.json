@@ -1,0 +1,90 @@
+{
+  "key": "RHAISTRAT-1291",
+  "summary": "Use AIPCC wheels in remaining Notebook images",
+  "status": "In Progress",
+  "statusCategory": "In Progress",
+  "priority": "Major",
+  "assignee": {
+    "displayName": "Nick Ommen",
+    "accountId": "712020:4d8ab7b7-4491-490a-b85b-8246663b9db3"
+  },
+  "fixVersions": [],
+  "labels": [],
+  "components": [
+    "Notebooks Images"
+  ],
+  "created": "2026-03-12T15:18:23.210+0000",
+  "updated": "2026-04-03T20:39:35.081+0000",
+  "statusNotes": {
+    "type": "doc",
+    "version": 1,
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "text": "YELLOW",
+            "marks": [
+              {
+                "type": "strong"
+              },
+              {
+                "type": "textColor",
+                "attrs": {
+                  "color": "#ffc400"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " as of 31-Mar-2027."
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "type": "text",
+            "text": "Remaining work blocked by "
+          },
+          {
+            "type": "inlineCard",
+            "attrs": {
+              "url": "https://redhat.atlassian.net/browse/AIPCC-7810"
+            }
+          },
+          {
+            "type": "text",
+            "text": "."
+          }
+        ]
+      }
+    ]
+  },
+  "issueLinks": [],
+  "epics": [],
+  "metrics": {
+    "totalEpics": 0,
+    "totalIssues": 0,
+    "issuesByStatus": {},
+    "issuesByCategory": {
+      "Done": 0,
+      "In Progress": 0,
+      "To Do": 0
+    },
+    "totalStoryPoints": 0,
+    "storyPointsDone": 0,
+    "completionPct": 0,
+    "staleCount": 0,
+    "unassignedCount": 0,
+    "blockerCount": 0,
+    "health": "YELLOW",
+    "epicMetrics": []
+  },
+  "topology": {
+    "repos": []
+  }
+}
