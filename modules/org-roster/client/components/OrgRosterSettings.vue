@@ -72,16 +72,20 @@
           <input
             v-model="config.teamBoardsTab"
             type="text"
+            placeholder="(optional) e.g. Scrum Team Boards"
             class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
+          <p class="text-xs text-gray-400 mt-1">Leave empty to derive teams from people data</p>
         </div>
         <div>
           <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Components Tab Name</label>
           <input
             v-model="config.componentsTab"
             type="text"
+            placeholder="(optional) e.g. Summary: components per team"
             class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
+          <p class="text-xs text-gray-400 mt-1">Leave empty to skip component/RFE tracking</p>
         </div>
         <div>
           <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Jira Project (for RFE queries)</label>
@@ -111,73 +115,79 @@
           :disabled="detectingOrgs"
           class="text-xs text-primary-600 hover:text-primary-700 dark:hover:text-primary-400 disabled:opacity-50"
         >
-          {{ detectingOrgs ? 'Detecting...' : 'Detect from Sheet' }}
+          {{ detectingOrgs ? 'Detecting...' : (config.teamBoardsTab ? 'Detect from Sheet' : 'Detect Orgs') }}
         </button>
       </div>
-      <p class="text-xs text-gray-400 mb-3">Maps org names from the spreadsheet to configured org display names. Only teams in configured orgs are synced.</p>
 
-      <div v-if="orgMappingRows.length > 0" class="space-y-2">
-        <!-- Auto-matched orgs -->
-        <div
-          v-for="row in autoMatchedOrgs"
-          :key="'matched-' + row.sheetOrg"
-          class="flex gap-2 items-center px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg"
-        >
-          <span class="flex-1 text-sm text-green-800 dark:text-green-300">{{ row.sheetOrg }}</span>
-          <span class="text-green-400 text-sm">→</span>
-          <span class="flex-1 text-sm text-green-800 dark:text-green-300">{{ row.sheetOrg }}</span>
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">matched</span>
-        </div>
+      <template v-if="!config.teamBoardsTab">
+        <p class="text-xs text-gray-400 mb-3">Org mapping is not needed when teams are derived from people data.</p>
+      </template>
+      <template v-else>
+        <p class="text-xs text-gray-400 mb-3">Maps org names from the spreadsheet to configured org display names. Only teams in configured orgs are synced.</p>
 
-        <!-- Suggested / unmatched orgs -->
-        <div
-          v-for="row in unmatchedOrgs"
-          :key="'unmatched-' + row.sheetOrg"
-          class="rounded-lg"
-          :class="row.isSuggestion && row.selectedOrg ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 p-3' : ''"
-        >
-          <div class="flex gap-2 items-center">
-            <span class="flex-1 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300">{{ row.sheetOrg }}</span>
-            <span class="text-gray-400 text-sm">→</span>
-            <select
-              v-model="row.selectedOrg"
-              class="flex-1 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-              :class="row.isSuggestion && row.selectedOrg ? 'border-amber-300 dark:border-amber-600' : 'border-gray-300 dark:border-gray-600'"
-              @change="row.isSuggestion && (row.isSuggestion = false)"
-            >
-              <option value="">— skip (don't sync) —</option>
-              <option v-for="org in configuredOrgs" :key="org" :value="org">{{ org }}</option>
-            </select>
+        <div v-if="orgMappingRows.length > 0" class="space-y-2">
+          <!-- Auto-matched orgs -->
+          <div
+            v-for="row in autoMatchedOrgs"
+            :key="'matched-' + row.sheetOrg"
+            class="flex gap-2 items-center px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg"
+          >
+            <span class="flex-1 text-sm text-green-800 dark:text-green-300">{{ row.sheetOrg }}</span>
+            <span class="text-green-400 text-sm">→</span>
+            <span class="flex-1 text-sm text-green-800 dark:text-green-300">{{ row.sheetOrg }}</span>
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">matched</span>
           </div>
-          <div v-if="row.isSuggestion && row.selectedOrg" class="flex items-center justify-between mt-2">
-            <span class="text-xs text-amber-700 dark:text-amber-300">Suggested match — does this look right?</span>
-            <div class="flex gap-2">
-              <button
-                @click="row.isSuggestion = false"
-                class="px-2.5 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
+
+          <!-- Suggested / unmatched orgs -->
+          <div
+            v-for="row in unmatchedOrgs"
+            :key="'unmatched-' + row.sheetOrg"
+            class="rounded-lg"
+            :class="row.isSuggestion && row.selectedOrg ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 p-3' : ''"
+          >
+            <div class="flex gap-2 items-center">
+              <span class="flex-1 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300">{{ row.sheetOrg }}</span>
+              <span class="text-gray-400 text-sm">→</span>
+              <select
+                v-model="row.selectedOrg"
+                class="flex-1 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-gray-700 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                :class="row.isSuggestion && row.selectedOrg ? 'border-amber-300 dark:border-amber-600' : 'border-gray-300 dark:border-gray-600'"
+                @change="row.isSuggestion && (row.isSuggestion = false)"
               >
-                Accept
-              </button>
-              <button
-                @click="row.selectedOrg = ''; row.isSuggestion = false"
-                class="px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-              >
-                Dismiss
-              </button>
+                <option value="">— skip (don't sync) —</option>
+                <option v-for="org in configuredOrgs" :key="org" :value="org">{{ org }}</option>
+              </select>
+            </div>
+            <div v-if="row.isSuggestion && row.selectedOrg" class="flex items-center justify-between mt-2">
+              <span class="text-xs text-amber-700 dark:text-amber-300">Suggested match — does this look right?</span>
+              <div class="flex gap-2">
+                <button
+                  @click="row.isSuggestion = false"
+                  class="px-2.5 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
+                >
+                  Accept
+                </button>
+                <button
+                  @click="row.selectedOrg = ''; row.isSuggestion = false"
+                  class="px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else-if="!detectingOrgs" class="text-xs text-gray-400 py-2">
-        Click "Detect from Sheet" to discover org names from the spreadsheet.
-      </div>
+        <div v-else-if="!detectingOrgs" class="text-xs text-gray-400 py-2">
+          Click "Detect from Sheet" to discover org names from the spreadsheet.
+        </div>
+      </template>
 
       <p v-if="detectError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ detectError }}</p>
     </div>
 
     <!-- Component Name Mapping -->
-    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+    <div v-if="config.componentsTab" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
       <div class="flex items-center justify-between mb-1">
         <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Component Name Mapping</h4>
         <button
@@ -277,8 +287,8 @@ const syncType = ref('full')
 const syncMessage = ref('')
 const syncError = ref(false)
 const config = ref({
-  teamBoardsTab: 'Scrum Team Boards',
-  componentsTab: 'Summary: components per team',
+  teamBoardsTab: '',
+  componentsTab: '',
   jiraProject: 'RHAIRFE',
   rfeIssueType: 'Feature Request',
   orgNameMapping: {},
