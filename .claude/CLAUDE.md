@@ -269,6 +269,7 @@ In production, all routes are authenticated via OpenShift OAuth proxy. The proxy
 - `/api/allowlist` — authorized email list
 - `/api/admin/roster-sync/config` — roster sync configuration
 - `/api/admin/roster-sync/status` — sync status (running/last result)
+- `/api/modules/team-tracker/sheets/discover` — discover sheet names in a Google Spreadsheet (admin, requires `spreadsheetId` query param)
 - `/api/modules/release-analysis/product-pages/products` — Product Pages product list for autocomplete (admin, includes authStatus)
 - `/api/modules/feature-traffic/features` — list features with filters (status, version, health, sort)
 - `/api/modules/feature-traffic/features/:key` — full feature detail

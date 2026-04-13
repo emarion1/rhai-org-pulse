@@ -14,7 +14,59 @@
           class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
         />
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          All sheets in the spreadsheet are auto-discovered. Sheets without a recognized name column are automatically skipped.
+          Enter the spreadsheet ID, then click "Discover Sheets" to select which sheets to include.
+        </p>
+      </div>
+
+      <!-- Sheet Picker -->
+      <div v-if="editSheetId.trim()" class="mt-4">
+        <div class="flex items-center gap-2 mb-2">
+          <button
+            @click="handleDiscoverSheets"
+            :disabled="discoveringSheets"
+            class="px-3 py-1.5 text-sm font-medium text-primary-600 dark:text-primary-400 border border-primary-300 dark:border-primary-600 rounded-md hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <span v-if="discoveringSheets" class="flex items-center gap-1.5">
+              <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              Discovering...
+            </span>
+            <span v-else>Discover Sheets</span>
+          </button>
+        </div>
+
+        <div v-if="discoverError" class="text-sm text-red-600 dark:text-red-400 mb-2">
+          {{ discoverError }}
+        </div>
+
+        <div v-if="discoveredSheets !== null && discoveredSheets.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
+          No sheets found in this spreadsheet.
+        </div>
+
+        <div v-if="discoveredSheets !== null && discoveredSheets.length > 0" class="space-y-1.5">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select sheets to include</label>
+          <label
+            v-for="sheet in discoveredSheets"
+            :key="sheet"
+            class="flex items-center gap-2 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              :value="sheet"
+              v-model="editSelectedSheets"
+              class="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{ sheet }}</span>
+          </label>
+          <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            When no sheets are selected, all sheets are auto-discovered during sync.
+          </p>
+        </div>
+
+        <p v-if="discoveredSheets === null && !discoverError" class="text-xs text-gray-400 dark:text-gray-500">
+          Click "Discover Sheets" to load sheet names for this spreadsheet.
         </p>
       </div>
     </div>
@@ -178,7 +230,8 @@ const {
   config,
   saving,
   fetchConfig,
-  saveConfig
+  saveConfig,
+  discoverSheets
 } = useRosterSync()
 
 const editSheetId = ref('')
@@ -188,10 +241,18 @@ const editCustomFields = ref([])
 const primaryDisplayIdx = ref(null)
 const saveMessage = ref(null)
 const saveError = ref(false)
+const editSelectedSheets = ref([])
+const discoveredSheets = ref(null)
+const discoveringSheets = ref(false)
+const discoverError = ref(null)
 
+let populatingForm = false
 function populateForm() {
   if (config.value) {
+    populatingForm = true
     editSheetId.value = config.value.googleSheetId || ''
+    editSelectedSheets.value = [...(config.value.sheetNames || [])]
+    populatingForm = false
     const ts = config.value.teamStructure
     if (ts) {
       editNameColumn.value = ts.nameColumn || ''
@@ -209,6 +270,30 @@ function populateForm() {
 }
 
 watch(config, populateForm)
+
+// Clear discovered sheets when spreadsheet ID changes (but not during form population)
+watch(editSheetId, () => {
+  if (populatingForm) return
+  discoveredSheets.value = null
+  editSelectedSheets.value = []
+  discoverError.value = null
+})
+
+async function handleDiscoverSheets() {
+  discoveringSheets.value = true
+  discoverError.value = null
+  try {
+    const sheets = await discoverSheets(editSheetId.value.trim())
+    discoveredSheets.value = sheets
+    // Preserve any previously selected sheets that still exist
+    editSelectedSheets.value = editSelectedSheets.value.filter(s => sheets.includes(s))
+  } catch (err) {
+    discoverError.value = err.message
+    discoveredSheets.value = null
+  } finally {
+    discoveringSheets.value = false
+  }
+}
 
 onMounted(async () => {
   await fetchConfig()
@@ -323,6 +408,7 @@ async function handleSave() {
 
     await saveConfig({
       googleSheetId: editSheetId.value.trim() || null,
+      sheetNames: editSelectedSheets.value,
       teamStructure
     })
     saveMessage.value = 'Team structure saved.'

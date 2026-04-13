@@ -19,8 +19,8 @@ module.exports = function registerRoutes(router, context) {
 
   function getModuleConfig() {
     return readFromStorage('org-roster/config.json') || {
-      teamBoardsTab: 'Scrum Team Boards',
-      componentsTab: 'Summary: components per team',
+      teamBoardsTab: '',
+      componentsTab: '',
       jiraProject: 'RHAIRFE',
       rfeIssueType: 'Feature Request',
       orgNameMapping: {},
@@ -720,11 +720,15 @@ module.exports = function registerRoutes(router, context) {
     }
 
     const sheetId = getSheetId();
-    if (!sheetId) {
-      return res.status(400).json({ error: 'No Google Sheet ID configured. Configure it in Team Tracker settings.' });
+    const config = getModuleConfig();
+    const needsSheet = config.teamBoardsTab || config.componentsTab;
+
+    if (needsSheet && !sheetId) {
+      return res.status(400).json({
+        error: 'No Google Sheet ID configured. Configure it in Team Tracker settings, or clear tab names to derive teams from people data.'
+      });
     }
 
-    const config = getModuleConfig();
     setSyncInProgress(true);
     res.json({ status: 'started' });
 
@@ -795,11 +799,15 @@ module.exports = function registerRoutes(router, context) {
     }
 
     const sheetId = getSheetId();
-    if (!sheetId) {
-      return res.status(400).json({ error: 'No Google Sheet ID configured. Configure it in Team Tracker settings.' });
+    const config = getModuleConfig();
+    const needsSheet = config.teamBoardsTab || config.componentsTab;
+
+    if (needsSheet && !sheetId) {
+      return res.status(400).json({
+        error: 'No Google Sheet ID configured. Configure it in Team Tracker settings, or clear tab names to derive teams from people data.'
+      });
     }
 
-    const config = getModuleConfig();
     setSyncInProgress(true);
     res.json({ status: 'started' });
 
@@ -946,17 +954,24 @@ module.exports = function registerRoutes(router, context) {
    */
   router.get('/sheet-orgs', requireAdmin, async function(req, res) {
     try {
-      const sheetId = getSheetId();
-      if (!sheetId) {
-        return res.status(400).json({ error: 'No Google Sheet ID configured.' });
+      const config = getModuleConfig();
+      const tabName = config.teamBoardsTab;
+
+      if (tabName) {
+        // Read orgs from sheet
+        const sheetId = getSheetId();
+        if (!sheetId) {
+          return res.status(400).json({ error: 'No Google Sheet ID configured.' });
+        }
+        const boardData = await fetchRawSheet(sheetId, tabName);
+        const teams = parseTeamBoardsTab(boardData.headers, boardData.rows);
+        const sheetOrgs = [...new Set(teams.map(t => t.org))].sort();
+        return res.json({ sheetOrgs });
       }
 
-      const config = getModuleConfig();
-      const tabName = config.teamBoardsTab || 'Scrum Team Boards';
-      const boardData = await fetchRawSheet(sheetId, tabName);
-      const teams = parseTeamBoardsTab(boardData.headers, boardData.rows);
-      const sheetOrgs = [...new Set(teams.map(t => t.org))].sort();
-
+      // No tab configured: return configured org display names
+      const displayNames = getOrgDisplayNames(storage);
+      const sheetOrgs = Object.values(displayNames).sort();
       res.json({ sheetOrgs });
     } catch (error) {
       console.error('[org-roster] GET /sheet-orgs error:', error);
@@ -1147,10 +1162,10 @@ module.exports = function registerRoutes(router, context) {
     try {
       const { teamBoardsTab, componentsTab, jiraProject, rfeIssueType, orgNameMapping, componentMapping } = req.body;
       const config = getModuleConfig();
-      if (teamBoardsTab) config.teamBoardsTab = teamBoardsTab;
-      if (componentsTab) config.componentsTab = componentsTab;
-      if (jiraProject) config.jiraProject = jiraProject;
-      if (rfeIssueType) config.rfeIssueType = rfeIssueType;
+      if (teamBoardsTab !== undefined) config.teamBoardsTab = teamBoardsTab;
+      if (componentsTab !== undefined) config.componentsTab = componentsTab;
+      if (jiraProject !== undefined) config.jiraProject = jiraProject;
+      if (rfeIssueType !== undefined) config.rfeIssueType = rfeIssueType;
       if (orgNameMapping !== undefined) config.orgNameMapping = orgNameMapping;
       if (componentMapping !== undefined) config.componentMapping = componentMapping;
       writeToStorage('org-roster/config.json', config);
@@ -1329,14 +1344,17 @@ module.exports = function registerRoutes(router, context) {
     // Delay startup sync by 5 minutes to avoid overlapping with team-tracker's roster-sync
     setTimeout(function() {
       const sheetId = getSheetId();
-      if (sheetId) {
+      const config = getModuleConfig();
+      const needsSheet = config.teamBoardsTab || config.componentsTab;
+      const canSync = sheetId || !needsSheet;
+
+      if (canSync) {
         // Run initial sync
         if (!isSyncInProgress()) {
           const rosterData = readFromStorage('org-roster-full.json');
           if (rosterData) {
             // Only sync if roster data exists (team-tracker has run)
             setSyncInProgress(true);
-            const config = getModuleConfig();
             runSync(storage, sheetId, config)
               .then(function() {
                 // Also refresh RFE
@@ -1363,19 +1381,20 @@ module.exports = function registerRoutes(router, context) {
           }
         }
 
-        // Schedule daily recurring sync
+        // Schedule daily recurring sync — re-read sheetId dynamically
         scheduleDaily(async function() {
           if (isSyncInProgress()) return;
           setSyncInProgress(true);
           try {
-            const config = getModuleConfig();
-            await runSync(storage, sheetId, config);
+            const currentSheetId = getSheetId();
+            const currentConfig = getModuleConfig();
+            await runSync(storage, currentSheetId, currentConfig);
             const { teams } = buildEnrichedTeams();
             const allComponents = [...new Set(teams.flatMap(t => t.components || []))];
             if (allComponents.length > 0) {
               const rfeResult = await fetchAllRfeBacklog(allComponents, teams, {
-                jiraProject: config.jiraProject,
-                rfeIssueType: config.rfeIssueType
+                jiraProject: currentConfig.jiraProject,
+                rfeIssueType: currentConfig.rfeIssueType
               });
               writeToStorage('org-roster/rfe-backlog.json', {
                 fetchedAt: new Date().toISOString(),

@@ -14,6 +14,7 @@ module.exports = function registerRoutes(router, context) {
   const { readRosterFull: sharedReadRosterFull, EXCLUDED_TITLES } = require('../../../shared/server/roster');
   const jiraSyncConfig = require('./jira/config');
   const { RESERVED_KEYS } = require('../../../shared/server/roster-sync/constants');
+  const sheetsModule = require('../../../shared/server/roster-sync/sheets');
   const snapshots = require('./snapshots');
 
   // ─── Refresh State Tracker ───
@@ -1623,6 +1624,48 @@ module.exports = function registerRoutes(router, context) {
     } catch (error) {
       console.error('Check roster-sync configured error:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * @openapi
+   * /api/modules/team-tracker/sheets/discover:
+   *   get:
+   *     tags: ['TT: Admin']
+   *     summary: Discover sheet names in a Google Spreadsheet
+   *     parameters:
+   *       - in: query
+   *         name: spreadsheetId
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: List of sheet names
+   *       400:
+   *         description: Invalid or missing spreadsheetId
+   *       403:
+   *         description: Forbidden — admin access required
+   */
+  router.get('/sheets/discover', requireAdmin, async function(req, res) {
+    try {
+      const { spreadsheetId } = req.query;
+
+      if (!spreadsheetId || typeof spreadsheetId !== 'string' || !spreadsheetId.trim()) {
+        return res.status(400).json({ error: 'spreadsheetId query parameter is required' });
+      }
+
+      // Google Sheet IDs are alphanumeric + hyphens/underscores, ~44 chars
+      const SHEET_ID_RE = /^[a-zA-Z0-9_-]{10,100}$/;
+      if (!SHEET_ID_RE.test(spreadsheetId.trim())) {
+        return res.status(400).json({ error: 'Invalid spreadsheet ID format' });
+      }
+
+      const sheets = await sheetsModule.discoverSheetNames(spreadsheetId.trim());
+      res.json({ sheets });
+    } catch (error) {
+      console.error('Discover sheets error:', error);
+      res.status(500).json({ error: 'Could not access spreadsheet. Verify the ID and that the service account has read access.' });
     }
   });
 
