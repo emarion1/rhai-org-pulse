@@ -45,14 +45,14 @@
       <MetricCard
         label="Issues Resolved"
         :value="teamMetrics?.aggregate?.resolvedCount"
-        subtitle="Last 90 days"
+        subtitle="Last year"
         @click="showResolvedIssues = true"
       />
       <MetricCard
         label="Story Points"
         :value="teamMetrics?.aggregate?.resolvedPoints"
         unit="pts"
-        subtitle="Last 90 days"
+        subtitle="Last year"
       />
       <MetricCard
         label="In Progress"
