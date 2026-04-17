@@ -80,7 +80,7 @@ function main() {
       try {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
         modules.push({ slug: manifest.slug || dir.name, name: manifest.name || dir.name, dir: dir.name });
-      } catch (err) {
+      } catch (_err) {
         // Skip modules with invalid JSON — validate-modules.js handles that
         continue;
       }
